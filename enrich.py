@@ -14,8 +14,12 @@ Runs after `leads.py run` and adds an `enrichment` table to coffee_leads.db
   search  Optional web search (Brave Search API, free tier) for the top
           independent leads with no Instagram yet. Only runs if BRAVE_API_KEY
           is set. Never fetches instagram.com itself.
-  web     Visits each known website's home page once a month and pulls
-          Instagram / Facebook / TikTok links, emails and phone numbers.
+  web     Visits each known website's home page (and its About / Our Story
+          page) once a month and pulls Instagram / Facebook / TikTok links,
+          emails, phone numbers and the owner/founder's name.
+  people  Optional (BRAVE_API_KEY): one search per top lead for its owner or
+          founder in news, local blogs and LinkedIn result titles. Every name
+          found keeps a link to where it was found (web_owner_url).
   manual  enrichment_manual.json (hand-checked values, keyed by lead_key) wins
           over everything above.
 
@@ -58,6 +62,9 @@ FIELDS = ["owner", "owner_role", "owner_source", "owners_all", "email", "website
           "instagram", "instagram_conf", "facebook", "tiktok", "osm_phone", "hours",
           "shop_address", "enrich_sources"]
 
+# Found-online owner, kept across runs (the steps that find it don't re-run daily).
+PERSIST = ["web_owner", "web_owner_role", "web_owner_url", "web_owner_source", "owner_checked"]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS enrichment (
   lead_key TEXT PRIMARY KEY,
@@ -65,7 +72,8 @@ CREATE TABLE IF NOT EXISTS enrichment (
   email TEXT, website TEXT, instagram TEXT, instagram_conf TEXT,
   facebook TEXT, tiktok TEXT, osm_phone TEXT, hours TEXT, shop_address TEXT,
   enrich_sources TEXT,
-  osm_id TEXT, web_checked TEXT, search_checked TEXT, search_note TEXT, updated_at TEXT);
+  osm_id TEXT, web_checked TEXT, search_checked TEXT, search_note TEXT, updated_at TEXT,
+  web_owner TEXT, web_owner_role TEXT, web_owner_url TEXT, web_owner_source TEXT, owner_checked TEXT);
 CREATE TABLE IF NOT EXISTS lookup_cache (
   dataset TEXT, key TEXT, payload TEXT, fetched_at TEXT, PRIMARY KEY (dataset, key));
 CREATE TABLE IF NOT EXISTS osm_cache (
@@ -194,7 +202,7 @@ class Store:
         self.con = con
         con.executescript(SCHEMA)
         cols = [r[1] for r in con.execute("PRAGMA table_info(enrichment)")]
-        for c in FIELDS + ["osm_id", "web_checked", "search_checked", "search_note", "updated_at"]:
+        for c in FIELDS + ["osm_id", "web_checked", "search_checked", "search_note", "updated_at"] + PERSIST:
             if c not in cols:
                 con.execute(f"ALTER TABLE enrichment ADD COLUMN {c} TEXT")
         self.cols = [r[1] for r in con.execute("PRAGMA table_info(enrichment)")]
@@ -722,6 +730,11 @@ def step_search(store, limit):
             print(f"  search: {name}: {str(e)[:120]}")
             continue
         note = []
+        if not store.row(k).get("web_owner"):  # owner mentions in the same results, no extra search
+            hit = owner_from_results([(u, t, d) for u, t, d in igres + results], l["name"], l.get("city"))
+            if hit:
+                remember_owner(store, k, hit[0], hit[1], hit[2], "web_search")
+                note.append("owner:" + hit[0])
         best = pick_instagram(igs, name, l.get("city"), l.get("state"))
         if best:
             store.add(k, "instagram", best[0], "web_search", 60 if best[1] == "high" else 45, best[1])
@@ -777,7 +790,28 @@ def scrape(url):
     tels = re.findall(r"tel:\+?1?[\s.\-()]*(\d{3})[\s.\-()]*(\d{3})[\s.\-]*(\d{4})", page)
     if tels:
         out["phone"] = "".join(tels[0])
+    out["text"] = page_text(page)
+    # Links to an About / Our Story / Team page on the same site (for owner names)
+    base = urllib.parse.urlparse(final)
+    abouts = []
+    for href in re.findall(r"href=[\"']([^\"'#]+)[\"']", page):
+        u = urllib.parse.urljoin(final, href)
+        pu = urllib.parse.urlparse(u)
+        if pu.netloc.removeprefix("www.") != base.netloc.removeprefix("www.") or u in abouts:
+            continue
+        if ABOUT_PATH.search(pu.path):
+            abouts.append(u)
+    out["about"] = abouts[:2] or [urllib.parse.urljoin(final, "/about")]
     return out
+
+
+ABOUT_PATH = re.compile(r"/(about|our-?story|story|team|meet|who-we-are|our-people|founders?|owners?)", re.I)
+
+
+def page_text(page):
+    page = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", page)
+    page = re.sub(r"(?i)<br\s*/?>|</(p|div|h\d|li|section)>", ". ", page)
+    return html.unescape(re.sub(r"<[^>]+>", " ", page))
 
 
 def step_web(store, limit):
@@ -795,14 +829,30 @@ def step_web(store, limit):
             site = "https://" + site
         todo.append((k, site))
     todo = todo[:limit]
-    ok = 0
+    ok = owners = 0
 
     def work(item):
         k, site = item
         try:
-            return k, site, scrape(site), None
+            res = scrape(site)
         except Exception as e:
             return k, site, None, str(e)[:100]
+        # Owner names: home page first, then the About / Our Story page.
+        lead = store.leads[k]
+        res["owner"] = None
+        pages = [(res["final"], res.get("text", ""))]
+        for u in res.get("about", []):
+            try:
+                fu, pg = http_get(u, timeout=10)
+                pages.append((fu, page_text(pg)))
+            except Exception:
+                pass
+        for url, text in pages:
+            found = extract_owners(text, lead["name"], lead.get("city"))
+            if found:
+                res["owner"] = (found[0][0], found[0][1], url)
+                break
+        return k, site, res, None
 
     with cf.ThreadPoolExecutor(8) as ex:
         for k, site, res, err in ex.map(work, todo):
@@ -820,7 +870,164 @@ def step_web(store, limit):
                     store.add(k, f, res[f], "website", 50)
             if res.get("phone"):
                 store.add(k, "osm_phone", res["phone"], "website", 30)
-    print(f"  web: {len(todo)} websites checked, {ok} reachable")
+            if res.get("owner"):
+                remember_owner(store, k, *res["owner"], "website")
+                owners += 1
+    print(f"  web: {len(todo)} websites checked, {ok} reachable, {owners} owner names found")
+
+
+# --------------------------------------------------------------------------
+# Owner names found online (website About pages, web search, LinkedIn titles)
+# --------------------------------------------------------------------------
+# Public filings often name a registered agent or a lawyer. These steps look for
+# the person the shop itself (or the press) calls its owner or founder:
+#   - the shop's website: home page plus its About / Our Story / Team page
+#   - Instagram / web search results already fetched by the search step (free)
+#   - step_people: one extra Brave search per lead, '"Shop" City owner OR founder',
+#     reading news snippets and LinkedIn result titles ("Jane Doe - Owner - Shop")
+# Every name found keeps a link to where it was found, so it can be checked.
+# Instagram and LinkedIn pages themselves are never fetched.
+_NM = r"[A-Z][a-z]+(?:[-'’][A-Z]?[a-z]+)?"
+NAME_RE = rf"({_NM}(?: (?:[A-Z]\.|{_NM})){{1,2}})"
+ROLE_RE = r"((?i:co-?owners?|owner[- ]operators?|owners?|co-?founders?|founders?|proprietors?))"
+OWNER_PATTERNS = [
+    # "Owner Jane Doe", "Founder: Jane Doe", "co-owners Jane Doe and..."
+    (re.compile(rf"\b{ROLE_RE}\s*(?:[,:–—-]\s*)?{NAME_RE}"), 2, 1),
+    # "Jane Doe, owner of", "Jane Doe, the founder"
+    (re.compile(rf"{NAME_RE}\s*,\s*(?:the\s+|our\s+)?{ROLE_RE}\b"), 1, 2),
+    # "Jane Doe is the owner"
+    (re.compile(rf"{NAME_RE}\s+(?:is|was|are)\s+(?:the\s+)?(?:proud\s+)?{ROLE_RE}\b"), 1, 2),
+    # "founded by Jane Doe", "owned and operated by Jane Doe"
+    (re.compile(rf"\b(?i:(founded|owned|opened|started|launched)(?: and operated)?\s+by)\s+{NAME_RE}"), 2, 1),
+]
+# LinkedIn search result titles: "Jane Doe - Owner - Blue Door Coffee | LinkedIn"
+LINKEDIN_TITLE = re.compile(rf"^{NAME_RE}\s*[-–|]\s*(?:[^-–|]*?\b)?{ROLE_RE}\b")
+NOT_NAME = GENERIC | {
+    "street", "st", "avenue", "ave", "road", "rd", "instagram", "facebook", "linkedin", "tiktok", "our",
+    "we", "meet", "about", "team", "story", "menu", "hours", "contact", "home", "store", "owner",
+    "owners", "founder", "founders", "barista", "chef", "manager", "city", "north", "south", "east",
+    "west", "new", "york", "san", "los", "saint", "mount", "lake", "park", "center", "market",
+    "brewing", "latte", "donut", "pizza", "grill", "family", "local", "best", "open", "opening", "now",
+    "coming", "soon", "grand", "welcome", "follow", "us", "all", "rights", "reserved", "copyright",
+    "privacy", "policy", "terms", "order", "online", "gift", "card", "catering", "events", "jobs",
+    "careers", "location", "locations", "visit", "find", "monday", "tuesday", "wednesday", "thursday",
+    "friday", "saturday", "sunday", "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december", "llc", "inc", "chief", "executive",
+    "officer", "head", "general", "director", "president", "local", "news", "daily", "times", "post",
+    "magazine", "journal", "eater", "business", "small", "black", "woman", "women", "veteran", "mom",
+    "husband", "wife", "brothers", "sisters", "partners", "friends", "roaster", "shop", "and", "the"}
+ROLE_WORD = {"coowner": "co-owner", "ownersoperator": "owner-operator", "owneroperator": "owner-operator",
+             "cofounder": "co-founder", "proprietor": "owner", "proprietors": "owner"}
+
+
+def clean_role(r):
+    k = re.sub(r"[^a-z]", "", (r or "").lower())
+    k = k[:-1] if k.endswith("s") and k not in ("proprietors",) else k
+    return ROLE_WORD.get(k, k or "owner")
+
+
+def extract_owners(text, shop_name="", city=""):
+    """Find 'owner/founder <Name>' style mentions. Returns [(name, role)], best first."""
+    text = re.sub(r"\s+", " ", html.unescape(text or ""))[:200_000]
+    shop_toks = set(distinctive(shop_name))
+    city_toks = set(tokens(city))
+    out = []
+    for pat, ni, ri in OWNER_PATTERNS:
+        for m in pat.finditer(text):
+            name = m.group(ni).strip()
+            role = clean_role(m.group(ri))
+            if role in ("founded", "owned", "opened", "started", "launched"):
+                role = "owner" if role == "owned" else "founder"
+            toks = [t.lower().strip(".") for t in name.split()]
+            if any(t in NOT_NAME for t in toks) or set(toks) & (shop_toks | city_toks):
+                continue
+            if not is_person(name) or len(name) > 40:
+                continue
+            if name not in [n for n, _ in out]:
+                out.append((name, role))
+    return out
+
+
+def owner_from_results(results, shop_name, city):
+    """results: [(url, title, description)] from a web search. Returns (name, role, url) or None.
+    Only uses results that actually mention the shop (its distinctive words)."""
+    dist = [t for t in distinctive(shop_name) if len(t) >= 3]
+    if not dist:
+        return None
+    for u, t, d in results:
+        hay = " ".join(tokens(f"{t} {d} {u}"))
+        hits = sum(1 for x in dist if x in hay)
+        if hits < max(1, (len(dist) + 1) // 2):
+            continue
+        if "linkedin.com/in/" in u:
+            m = LINKEDIN_TITLE.search(t or "")
+            if m:
+                name = m.group(1).strip()
+                toks = [x.lower() for x in name.split()]
+                if is_person(name) and not any(x in NOT_NAME for x in toks):
+                    return name, clean_role(m.group(2)), u
+        found = extract_owners(f"{t}. {d}", shop_name, city)
+        if found:
+            return found[0][0], found[0][1], u
+    return None
+
+
+def remember_owner(store, k, name, role, url, source):
+    """Save an online-found owner on the lead (kept across runs) and offer it as a candidate."""
+    row = store.row(k)
+    row["web_owner"], row["web_owner_role"], row["web_owner_url"] = name, role, url
+    row["web_owner_source"] = source
+    store.add(k, "owner", name, source, 58, role)
+
+
+def step_saved_owners(store):
+    """Re-offer owners found online on earlier runs (those steps don't re-run every day)."""
+    for k, row in store.rows.items():
+        if row.get("web_owner") and k in store.leads:
+            store.add(k, "owner", row["web_owner"], row.get("web_owner_source") or "website", 58,
+                      row.get("web_owner_role") or "owner")
+
+
+def step_people(store, limit):
+    """One web search per lead for its owner/founder: news, local blogs, LinkedIn titles."""
+    key = os.environ.get("BRAVE_API_KEY", "").strip()
+    if not key:
+        print("  people: skipped (set BRAVE_API_KEY to enable)")
+        return
+    todo = []
+    for k, l in store.leads.items():
+        row = store.row(k)
+        if l["chain"] or row.get("web_owner") or not distinctive(l["name"]):
+            continue
+        last = row.get("owner_checked")
+        if last and (dt.datetime.fromisoformat(NOW) - dt.datetime.fromisoformat(last[:19])).days < 60:
+            continue
+        todo.append(l)
+    todo.sort(key=lambda l: -int(l["score"] or 0))
+    todo = todo[:limit]
+    found = 0
+    for l in todo:
+        k = l["lead_key"]
+        name = clean_query_name(l["name"])
+        place = " ".join(filter(None, [l.get("city"), l.get("state")]))
+        try:
+            results = brave(f'"{name}" {place} owner OR founder', key)
+            time.sleep(1.1)
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                print("  people: rate limited, stopping for today")
+                break
+            print(f"  people: {name}: HTTP {e.code}")
+            continue
+        except Exception as e:
+            print(f"  people: {name}: {str(e)[:120]}")
+            continue
+        store.row(k)["owner_checked"] = NOW
+        hit = owner_from_results(results, l["name"], l.get("city"))
+        if hit:
+            remember_owner(store, k, hit[0], hit[1], hit[2], "owner_search")
+            found += 1
+    print(f"  people: {len(todo)} leads searched, {found} owner names found")
 
 
 # --------------------------------------------------------------------------
@@ -853,11 +1060,12 @@ def step_manual(store):
 # Export
 # --------------------------------------------------------------------------
 def export_csv(con, path=L.CSV_FILE):
-    ecols = ["owner", "owner_role", "owners_all", "email", "website", "instagram", "instagram_conf",
+    ecols = ["owner", "owner_role", "owners_all", "web_owner", "web_owner_role", "web_owner_url", "email", "website", "instagram", "instagram_conf",
              "facebook", "tiktok", "osm_phone", "hours", "shop_address", "enrich_sources"]
     cur = con.execute(f"""SELECT l.name, l.alt_names, l.address, l.city, l.state, l.zip, l.phone,
         {", ".join("e." + c for c in ecols)},
-        l.first_event_date, l.last_event_date, l.signals, l.event_types, l.sources, l.record_count,
+        l.first_event_date, l.last_event_date, l.open_status, l.open_est_start, l.open_est_end, l.open_conf,
+        l.signals, l.event_types, l.sources, l.record_count,
         l.match_level, l.chain, l.score, l.lat, l.lon, l.first_seen, l.status, l.lead_key
         FROM leads l LEFT JOIN enrichment e USING (lead_key)
         ORDER BY l.score DESC, l.first_event_date DESC""")
@@ -882,9 +1090,10 @@ def cmd_stats(con):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("cmd", nargs="?", default="run", choices=["run", "stats"])
-    p.add_argument("--steps", default="owners,osm,search,web,manual")
+    p.add_argument("--steps", default="owners,osm,search,web,people,manual")
     p.add_argument("--search-limit", type=int, default=int(os.environ.get("SEARCH_LIMIT", "45")))
     p.add_argument("--web-limit", type=int, default=300)
+    p.add_argument("--owner-search-limit", type=int, default=int(os.environ.get("OWNER_SEARCH_LIMIT", "8")))
     a = p.parse_args()
     con = sqlite3.connect(L.DB_FILE)
     if a.cmd == "stats":
@@ -906,6 +1115,9 @@ def main():
         step_search(store, a.search_limit)
     if "web" in steps:
         step_web(store, a.web_limit)
+    if "people" in steps:
+        step_people(store, a.owner_search_limit)
+    step_saved_owners(store)
     store.resolve()
     store.save()
     export_csv(con)

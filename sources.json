@@ -1,5 +1,5 @@
 {
-  "_doc": "One entry per dataset. See README.md for every key. signal = what kind of opening evidence the record is (drives the score).",
+  "_doc": "One entry per dataset. See README.md for every key. signal = what kind of opening evidence the record is (drives the score). Optional per source: fields.open_date (a real opening / first-sales date) and opening = {lo, hi, conf, basis} to override the default opening-window rule for its signal.",
   "sources": [
     {
       "id": "chicago_food_license_inspections",
@@ -129,6 +129,12 @@
         "zip": "zip_code",
         "category": "primary_naics_description",
         "date": "location_start_date"
+      },
+      "opening": {
+        "lo": -14,
+        "hi": 30,
+        "conf": "medium",
+        "basis": "LA business tax registration start date for this location (some are future, planned dates)."
       }
     },
     {
@@ -428,14 +434,17 @@
         "BEAN",
         "BOBA",
         "MATCHA",
-        "TEA HOUSE",
-        "BUBBLE TEA",
+        "PERK",
+        "CUP",
+        "GROUND",
+        "GRIND",
+        "TEA",
         "STARBUCKS",
         "DUNKIN",
         "DUTCH BROS",
         "7 BREW"
       ],
-      "_words_note": "Short word list: hosted ArcGIS servers reject very long GET queries",
+      "_words_note": "Own word list for this server. Long queries are sent as POST, so adding words is fine; keep it in step with DEFAULT_WORDS in leads.py.",
       "default_city": "Philadelphia",
       "exclude_status": "inactive|revoked",
       "fields": {
@@ -475,14 +484,17 @@
         "BEAN",
         "BOBA",
         "MATCHA",
-        "TEA HOUSE",
-        "BUBBLE TEA",
+        "PERK",
+        "CUP",
+        "GROUND",
+        "GRIND",
+        "TEA",
         "STARBUCKS",
         "DUNKIN",
         "DUTCH BROS",
         "7 BREW"
       ],
-      "_words_note": "Short word list: hosted ArcGIS servers reject very long GET queries",
+      "_words_note": "Own word list for this server. Long queries are sent as POST, so adding words is fine; keep it in step with DEFAULT_WORDS in leads.py.",
       "default_city": "Washington",
       "extra_where": "PREMISEINDC = 'Yes'",
       "fields": {
@@ -552,14 +564,17 @@
         "BEAN",
         "BOBA",
         "MATCHA",
-        "TEA HOUSE",
-        "BUBBLE TEA",
+        "PERK",
+        "CUP",
+        "GROUND",
+        "GRIND",
+        "TEA",
         "STARBUCKS",
         "DUNKIN",
         "DUTCH BROS",
         "7 BREW"
       ],
-      "_words_note": "Short word list: hosted ArcGIS servers reject very long GET queries",
+      "_words_note": "Own word list for this server. Long queries are sent as POST, so adding words is fine; keep it in step with DEFAULT_WORDS in leads.py.",
       "event_label": "Food permit opened (Wake County Environmental Health)",
       "fields": {
         "id": "HSISID",
@@ -571,6 +586,12 @@
         "phone": "PHONENUMBER",
         "category": "FACILITYTYPE",
         "date": "RESTAURANTOPENDATE"
+      },
+      "opening": {
+        "lo": 0,
+        "hi": 14,
+        "conf": "high",
+        "basis": "Wake County records this date as the restaurant's permit open date."
       }
     },
     {
@@ -624,14 +645,17 @@
         "BEAN",
         "BOBA",
         "MATCHA",
-        "TEA HOUSE",
-        "BUBBLE TEA",
+        "PERK",
+        "CUP",
+        "GROUND",
+        "GRIND",
+        "TEA",
         "STARBUCKS",
         "DUNKIN",
         "DUTCH BROS",
         "7 BREW"
       ],
-      "_words_note": "Short word list: hosted ArcGIS servers reject very long GET queries",
+      "_words_note": "Own word list for this server. Long queries are sent as POST, so adding words is fine; keep it in step with DEFAULT_WORDS in leads.py.",
       "event_label": "Local business tax receipt (business start)",
       "fields": {
         "id": "Account__",
@@ -672,14 +696,17 @@
         "BEAN",
         "BOBA",
         "MATCHA",
-        "TEA HOUSE",
-        "BUBBLE TEA",
+        "PERK",
+        "CUP",
+        "GROUND",
+        "GRIND",
+        "TEA",
         "STARBUCKS",
         "DUNKIN",
         "DUTCH BROS",
         "7 BREW"
       ],
-      "_words_note": "Short word list: hosted ArcGIS servers reject very long GET queries",
+      "_words_note": "Own word list for this server. Long queries are sent as POST, so adding words is fine; keep it in step with DEFAULT_WORDS in leads.py.",
       "event_label": "Certificate of Use issued",
       "fields": {
         "id": "USER_CERTIFICATE_NUMBER",
@@ -694,6 +721,12 @@
         "category": "USER_BUSINSESS_USE",
         "event_type": "USER_APPLICATION_TYPE",
         "date": "USER_ISSUED_DATE"
+      },
+      "opening": {
+        "lo": 0,
+        "hi": 60,
+        "conf": "medium",
+        "basis": "Miami-Dade issues a Certificate of Use shortly before a business can open."
       }
     },
     {
@@ -785,7 +818,14 @@
         "state": "outlet_state",
         "zip": "outlet_zip_code",
         "category": "outlet_naics_code",
-        "date": "outlet_permit_issue_date"
+        "date": "outlet_permit_issue_date",
+        "open_date": "outlet_first_sales_date"
+      },
+      "opening": {
+        "lo": 0,
+        "hi": 60,
+        "conf": "medium",
+        "basis": "Texas sales tax permits are usually issued in the weeks before a new location starts selling."
       }
     },
     {
@@ -963,14 +1003,17 @@
         "BEAN",
         "BOBA",
         "MATCHA",
-        "TEA HOUSE",
-        "BUBBLE TEA",
+        "PERK",
+        "CUP",
+        "GROUND",
+        "GRIND",
+        "TEA",
         "STARBUCKS",
         "DUNKIN",
         "DUTCH BROS",
         "7 BREW"
       ],
-      "_words_note": "Short word list: hosted ArcGIS servers reject very long GET queries",
+      "_words_note": "Own word list for this server. Long queries are sent as POST, so adding words is fine; keep it in step with DEFAULT_WORDS in leads.py.",
       "extra_where": "Location <> 'Home Based'",
       "fields": {
         "id": "Record_number",

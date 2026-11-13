@@ -69,9 +69,17 @@ earlier but needs a quick check (Google/Instagram) to find the actual location.
    - `strong`: name clearly means coffee (coffee, espresso, roaster, latte, boba, matcha, chains)
    - `category`: the dataset's category field says coffee/tea (NYC "Coffee/Tea", NAICS text)
    - `cafe`: name has "cafe" (often coffee, sometimes a diner)
+   - `keyword`: name has brew(s), grind(s), grounds, grounded, cup, tea or perk. Counts on
+     its own, unless the dataset's category is clearly not food (landscaping, construction...)
+     or the name hits a noise filter (`KEYWORD_NEGATIVE`: "Grounds Maintenance", "Grounded Yoga")
    - `naics`: only the NAICS code says snack/beverage bar (722515)
-   - `weak`: words like bean/grind/brew plus a food category
-   - negative patterns drop breweries, internet cafes, bookkeeping firms named "Platte", etc.
+   - `weak`: words like bean/bakery/donut plus a food category
+   - negative patterns drop breweries, internet cafes, bookkeeping firms named "Platte", and
+     any name with sandwich(es), burger, bowls or plates
+
+   To add a search word, put it in `DEFAULT_WORDS` (what the portals are asked for) **and**
+   in `STRONG`, `CAFE` or `KEYWORD` (what counts), all in `leads.py`. Six ArcGIS sources have
+   their own `words` list in `sources.json`. To throw a word out, add it to `NEGATIVE`.
 3. **Dedupe**: records collapse into one lead per location, keyed on street
    number + street name + ZIP. A Chicago shop with a new license *and* a license
    inspection becomes one lead with both signals.
@@ -79,6 +87,17 @@ earlier but needs a quick check (Google/Instagram) to find the actual location.
    new food permit > new license > state registration) + a bonus for multiple
    signals + recency, minus 45 for corporate chains (they buy POS centrally,
    so independents float to the top; chains stay in the table, flagged in `chain`).
+
+## Estimated opening (`open_status`, `open_est_start`, `open_est_end`, `open_conf`)
+
+Each lead gets a label (**Upcoming**, **Opening now**, **Probably open**) and a date range,
+estimated from its best record: pre-opening inspection 0 to 6 weeks after the inspection
+(high confidence), new food permit 0 to 30 days, new business license 2 weeks before to
+6 weeks after, first-ever inspection 2 months before to 2 weeks after (usually already
+open), state registration 3 to 9 months after (low confidence). An actual reported date
+(Texas first-sales date) wins. These are rules of thumb in `OPENING_RULES` in `leads.py`;
+a source can override with an `"opening": {"lo", "hi", "conf", "basis"}` block or map a real
+date with `fields.open_date`. Tune them once real opening dates come in.
 
 ## Owner names, Instagram and contact info (`enrich.py`)
 
@@ -96,7 +115,8 @@ runs) and adds these columns to the CSV and the page: `owner`, `owner_role`,
 | owners | TX **Active Sales Tax Permit Holders** (by taxpayer number) | the actual storefront address and first sales date for TX state filings |
 | osm | OpenStreetMap cafes via the Overpass API (cached a week per state) | website, Instagram, Facebook, phone, hours, matched by address or location + name |
 | search | Brave Search API, **only if `BRAVE_API_KEY` is set** (free tier, ~45 leads a day) | Instagram handle + website for the top independent leads |
-| web | The shop's home page, at most once a month | Instagram / Facebook / TikTok links, email, phone |
+| web | The shop's home page and its About / Our Story / Team page, at most once a month | Instagram / Facebook / TikTok links, email, phone, owner or founder named on the site |
+| people | Brave Search, **only if `BRAVE_API_KEY` is set** (8 leads a day by default) | owner / founder from news, local blogs and LinkedIn result titles |
 | manual | `enrichment_manual.json` | anything you checked by hand; wins over the rest |
 
 `instagram_conf`: **high** = handle matches the name and the city (or came
@@ -104,9 +124,13 @@ from the shop's own site / OpenStreetMap), **medium** = name matches but the
 city wasn't confirmed (shown as "likely"), **verified** = checked by hand.
 Instagram itself is never fetched.
 
-Owner names are from public filings and are often a registered agent, an
-officer or a filing contact rather than the day-to-day owner, so verify
-before outreach. To turn on search: get a free key at
+Owner names from public filings are often a registered agent, an officer or a
+filing contact rather than the day-to-day owner. A name the shop's own site, a
+news story or a LinkedIn title calls "owner" or "founder" is ranked above
+officers and agents, and is saved with a link to where it was found
+(`web_owner`, `web_owner_role`, `web_owner_url`). Verify before outreach.
+Daily Brave search volume is set by `SEARCH_LIMIT` and `OWNER_SEARCH_LIMIT` in
+`.github/workflows/daily.yml` (defaults fit Brave's $5/month free credit). To turn on search: get a free key at
 https://brave.com/search/api/, then add it as a repo secret named
 `BRAVE_API_KEY` (Settings → Secrets and variables → Actions).
 
@@ -198,6 +222,5 @@ Source keys:
   "Blue Door"). NYC's cuisine tag and LA/CT NAICS codes catch some of these.
 - State registrations include ghost kitchens, roasters, mobile carts and
   people who never open. Score reflects that.
-- Seattle/King County's inspection dataset now requires a login, and San
-  Francisco's portal blocked browser requests during the first build, so
-  they're not in yet.
+- San Francisco's portal blocked browser requests during the first build, so
+  it's not in yet.

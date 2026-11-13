@@ -59,6 +59,11 @@ jobs:
         env:
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+          # Daily Brave search budget (only used if BRAVE_API_KEY is set). Instagram search
+          # uses 2 searches per lead, owner search 1. 12 + 8 leads = ~32 searches a day,
+          # ~970 a month, which fits in Brave's $5/month free credit (~1,000 searches).
+          SEARCH_LIMIT: "12"
+          OWNER_SEARCH_LIMIT: "8"
         run: python3 enrich.py
 
       - name: Build page
