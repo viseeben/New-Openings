@@ -50,10 +50,16 @@ STRONG = [
 ]
 # A "cafe" name is often a coffee shop, sometimes a diner. Scored lower than strong.
 CAFE = [r"\bcaf[eé]s?\b", r"\bkafe\b", r"\bcafeteria\b"]
+# Keyword: coffee-ish words that count on their own (no category needed), but
+# score lower than "strong" because they're noisier ("Grounded Yoga", "Tea Party").
+# Dropped if the dataset's category field says something clearly non-food.
+KEYWORD = [
+    r"\bbrews?\b", r"\bgrinds?\b", r"\bgrounds\b", r"\bgrounded\b", r"\bcups?\b",
+    r"\btea\b", r"\bperks?\b",
+]
 # Weak: only counts when the category field also points at coffee/food service.
 WEAK = [
-    r"\bbeans?\b", r"\bbrews?\b", r"\bgrind\b", r"\bcup\b", r"\bmug\b",
-    r"\bperk\b", r"\bbakery\b", r"\bdonuts?\b", r"\bbagels?\b", r"\btea\b",
+    r"\bbeans?\b", r"\bgrind\b", r"\bmug\b", r"\bbakery\b", r"\bdonuts?\b", r"\bbagels?\b",
 ]
 # Things that match the patterns above but are not coffee shops.
 NEGATIVE = [
@@ -62,6 +68,26 @@ NEGATIVE = [
     r"\bvape", r"smoke shop", r"hookah", r"laundr", r"coffee table", r"vending",
     r"gas station", r"bookkeeping", r"\bplatte\b", r"cafeteria", r"\bjavascript",
     r"java (software|dev)", r"\bbeanie", r"bean bag", r"coffee ?break service",
+    # Excluded on request (restaurant-type names), even if they also say coffee/cafe:
+    r"\bsandwich(es)?\b", r"\bburgers?\b", r"\bbowls\b", r"\bplates\b",
+]
+# Extra noise filters that only apply to KEYWORD-level matches, so a real
+# "Grounded Coffee" still gets through but "Grounds Maintenance LLC" doesn't.
+KEYWORD_NEGATIVE = [
+    r"landscap", r"\blawns?\b", r"grounds? ?(maintenance|keeping|care|crew|service)", r"playground",
+    r"campground", r"fairground", r"underground", r"background", r"\bworld cup\b", r"\btea ?party\b",
+    r"\bcounsel", r"therap", r"\byoga\b", r"\bfitness\b", r"\bchurch\b", r"ministr", r"electric",
+    r"plumb", r"roofing", r"construct", r"\bgolf\b", r"\bhockey\b", r"\bsoccer\b", r"trophy",
+    r"\bauto\b", r"towing", r"\bperkins\b",
+]
+# Category text that clearly isn't food (vetoes a KEYWORD match). Numeric NAICS
+# codes are vetoed unless they're food-related (72, 311, 4452, 4459).
+NONFOOD_CATEGORY = [
+    r"landscap", r"construct", r"contractor", r"repair", r"cleaning", r"janitorial", r"real estate",
+    r"consult", r"legal", r"account", r"insurance", r"salon", r"barber", r"beauty", r"nail",
+    r"automotive", r"\bauto\b", r"transport", r"trucking", r"plumb", r"electric", r"roofing",
+    r"medical", r"health care", r"dental", r"fitness", r"religious", r"software", r"computer",
+    r"apparel", r"clothing", r"jewelry", r"tattoo", r"cannabis", r"tobacco", r"liquor",
 ]
 NEGATIVE_CATEGORY = [r"coffee-break service", r"door-to-door", r"holding compan"]
 # Category / activity text that confirms a coffee business (NYC cuisine, NAICS, etc.)
@@ -87,11 +113,19 @@ def _c(ps):
 _strong, _cafe, _weak, _neg = _c(STRONG), _c(CAFE), _c(WEAK), _c(NEGATIVE)
 _negcat, _coffeecat, _foodcat = _c(NEGATIVE_CATEGORY), _c(COFFEE_CATEGORY), _c(FOOD_CATEGORY)
 _naicscat = _c(NAICS_CATEGORY)
+_kw, _kwneg, _nonfood = _c(KEYWORD), _c(KEYWORD_NEGATIVE), _c(NONFOOD_CATEGORY)
+
+
+def nonfood_category(cat):
+    c = (cat or "").strip()
+    if re.fullmatch(r"\d{2,6}", c):
+        return not re.match(r"(72|311|4452|4459)", c)
+    return any(p.search(c) for p in _nonfood)
 
 
 def classify(name, category_text=""):
     """Return (match_level, chain). match_level is one of
-    strong | category | cafe | naics | weak | None (not a coffee lead)."""
+    strong | category | cafe | keyword | naics | weak | None (not a coffee lead)."""
     text = (name or "").strip()
     cat = (category_text or "").strip()
     low = text.lower()
@@ -104,6 +138,10 @@ def classify(name, category_text=""):
         return "category", None
     if any(p.search(text) for p in _cafe):
         return "cafe", None
+    if any(p.search(text) for p in _kw) and not any(p.search(text) for p in _kwneg):
+        # A category that's present but clearly not food (e.g. NAICS landscaping) vetoes it.
+        if not nonfood_category(cat):
+            return "keyword", None
     if cat and any(p.search(cat) for p in _naicscat):
         return "naics", None
     if cat and any(p.search(text) for p in _weak) and any(p.search(cat) for p in _foodcat):
@@ -114,17 +152,23 @@ def classify(name, category_text=""):
 # --------------------------------------------------------------------------
 # HTTP helpers
 # --------------------------------------------------------------------------
-def http_json(url, params=None, retries=4):
-    if params:
+def http_json(url, params=None, retries=4, post=False):
+    """GET (or form POST, for queries too long for a URL) and parse JSON."""
+    body = None
+    if params and post:
+        body = urllib.parse.urlencode(params).encode()
+    elif params:
         url = url + ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
     headers = {"User-Agent": UA, "Accept": "application/json"}
+    if body:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
     token = os.environ.get("SOCRATA_APP_TOKEN")
     if token and "/resource/" in url:
         headers["X-App-Token"] = token
     last = None
     for i in range(retries):
         try:
-            req = urllib.request.Request(url, headers=headers)
+            req = urllib.request.Request(url, data=body, headers=headers)
             with urllib.request.urlopen(req, timeout=90) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
@@ -149,8 +193,11 @@ def socrata_like(fields, words):
     return "(" + " OR ".join(parts) + ")"
 
 
+# Server-side pre-filter (substring match, so ROAST also catches ROASTERS, GROUND
+# catches GROUNDS/GROUNDED, TEA catches TEA HOUSE). classify() then decides what
+# actually counts, so a word added here must also be in one of the lists above.
 DEFAULT_WORDS = ["COFFEE", "ESPRESSO", "CAFE", "CAFÉ", "ROAST", "BREW", "JAVA",
-                 "LATTE", "BEAN", "BARISTA", "BOBA", "TEA HOUSE", "TEAHOUSE", "BUBBLE TEA",
+                 "LATTE", "BEAN", "BARISTA", "BOBA", "TEA", "GRIND", "GROUND", "CUP", "PERK",
                  "MATCHA", "KAFFE",
                  "STARBUCKS", "DUNKIN", "DUTCH BROS", "PEET", "CARIBOU",
                  "SCOOTER", "BIGGBY", "7 BREW", "PHILZ"]
@@ -229,7 +276,9 @@ def fetch_arcgis(src, since):
         params = {"where": " AND ".join(where), "outFields": "*", "f": "json",
                   "resultOffset": offset, "resultRecordCount": 2000,
                   "returnGeometry": "true", "outSR": 4326}
-        data = http_json(url, params)
+        # ArcGIS servers reject long GET URLs; POST the same query when it's long.
+        long_q = len(urllib.parse.urlencode(params)) > 1500
+        data = http_json(url, params, post=long_q)
         if "error" in data:
             raise RuntimeError(json.dumps(data["error"])[:500])
         feats = data.get("features", [])
@@ -396,7 +445,8 @@ CREATE TABLE IF NOT EXISTS leads (
   state TEXT, zip TEXT, phone TEXT, lat TEXT, lon TEXT,
   first_event_date TEXT, last_event_date TEXT, signals TEXT, sources TEXT,
   event_types TEXT, record_count INTEGER, match_level TEXT, chain TEXT,
-  score INTEGER, first_seen TEXT, status TEXT DEFAULT 'new', notes TEXT DEFAULT '');
+  score INTEGER, first_seen TEXT, status TEXT DEFAULT 'new', notes TEXT DEFAULT '',
+  open_est_start TEXT, open_est_end TEXT, open_status TEXT, open_conf TEXT, open_basis TEXT);
 CREATE TABLE IF NOT EXISTS runs (
   run_at TEXT, source_id TEXT, fetched INTEGER, matched INTEGER, error TEXT);
 """
@@ -407,8 +457,74 @@ SIGNAL_WEIGHT = {"pre_opening_inspection": 40, "new_food_permit": 35,
                  "inspection": 10}
 
 
+# --------------------------------------------------------------------------
+# Estimated opening window
+# --------------------------------------------------------------------------
+# Rules of thumb, in days relative to the record's event date: (earliest, latest,
+# confidence, why). These are typical timelines, not measured ones; tune them as
+# real opening dates come in. A source can override with an "opening" block in
+# sources.json, and a source that maps fields.open_date (an actual reported
+# opening / first-sales date) beats any estimate.
+OPENING_RULES = {
+    "pre_opening_inspection": (0, 42, "high", "Pre-opening inspections happen in the last few weeks before a shop opens."),
+    "new_food_permit": (0, 30, "high", "A new food permit is usually issued right around opening."),
+    "plan_review": (60, 150, "medium", "Health plan review typically comes 2 to 5 months before opening."),
+    "building_permit": (60, 180, "medium", "Build-out permits typically come 2 to 6 months before opening."),
+    "new_business_license": (-14, 45, "medium", "A new business license is usually issued within weeks of opening."),
+    "business_registration": (90, 270, "low", "A new LLC or trade name usually comes 3 to 9 months before opening, and some never open."),
+    "inspection": (-90, 0, "medium", "Routine inspections happen after a shop is open."),
+}
+FIRST_APPEARANCE_RULE = (-60, 14, "medium",
+                         "First inspection on record. These are often the first routine inspection, so the shop is likely already open.")
+CONF_RANK = {"high": 3, "medium": 2, "low": 1}
+
+
+def opening_window(recs, src_by_id, today):
+    """Pick the most trustworthy opening estimate across a lead's records.
+    Returns dict(open_est_start, open_est_end, open_status, open_conf, open_basis)."""
+    best = None
+    for r in recs:
+        src = src_by_id.get(r["source_id"], {})
+        d = r.get("event_date")
+        actual = ""
+        if src.get("fields", {}).get("open_date"):
+            try:
+                actual = parse_date(get(json.loads(r.get("raw") or "{}"), src["fields"]["open_date"])) or ""
+            except Exception:
+                actual = ""
+        if actual:
+            lo = hi = dt.date.fromisoformat(actual)
+            conf, why = "high", "Opening / first-sales date reported in the public record."
+            rank = 4
+        elif d:
+            o = src.get("opening")
+            if o:
+                rule = (o["lo"], o["hi"], o["conf"], o["basis"])
+            elif src.get("mode") == "first_appearance":
+                rule = FIRST_APPEARANCE_RULE
+            else:
+                rule = OPENING_RULES.get(r["signal"], (0, 90, "low", "Unknown signal type."))
+            ev = dt.date.fromisoformat(d)
+            lo, hi = ev + dt.timedelta(days=rule[0]), ev + dt.timedelta(days=rule[1])
+            conf, why = rule[2], rule[3]
+            rank = CONF_RANK[conf]
+        else:
+            continue
+        key = (rank, -(hi - lo).days, hi)  # most confident, then narrowest, then latest
+        if best is None or key > best[0]:
+            best = (key, lo, hi, conf, why)
+    if not best:
+        return {"open_est_start": "", "open_est_end": "", "open_status": "", "open_conf": "", "open_basis": ""}
+    _, lo, hi, conf, why = best
+    status = "Upcoming" if today < lo else "Opening now" if today <= hi else "Probably open"
+    if lo == hi and 0 <= (today - hi).days <= 30:  # a reported opening date in the last month
+        status = "Opening now"
+    return {"open_est_start": lo.isoformat(), "open_est_end": hi.isoformat(),
+            "open_status": status, "open_conf": conf, "open_basis": why}
+
+
 def score(lead, today):
-    s = {"strong": 40, "category": 35, "cafe": 22, "naics": 15, "weak": 12}.get(lead["match_level"], 0)
+    s = {"strong": 40, "category": 35, "cafe": 22, "keyword": 18, "naics": 15, "weak": 12}.get(lead["match_level"], 0)
     s += max(SIGNAL_WEIGHT.get(x, 5) for x in lead["signals"].split(","))
     if len(set(lead["signals"].split(","))) > 1:
         s += 10
@@ -424,8 +540,21 @@ def score(lead, today):
     return max(0, min(100, s))
 
 
+LEAD_ADDED_COLS = ["open_est_start", "open_est_end", "open_status", "open_conf", "open_basis"]
+
+
+def migrate(con):
+    """Add columns introduced after a database was first created."""
+    have = [r[1] for r in con.execute("PRAGMA table_info(leads)")]
+    for c in LEAD_ADDED_COLS:
+        if c not in have:
+            con.execute(f"ALTER TABLE leads ADD COLUMN {c} TEXT")
+
+
 def rebuild_leads(con):
     today = dt.date.today()
+    migrate(con)
+    src_by_id = {s["id"]: s for s in load_sources()}
     rows = con.execute("SELECT * FROM records ORDER BY event_date").fetchall()
     cols = [d[0] for d in con.execute("SELECT * FROM records LIMIT 0").description]
     groups = {}
@@ -435,7 +564,7 @@ def rebuild_leads(con):
     existing = {k: (st, nt, fs) for k, st, nt, fs in
                 con.execute("SELECT lead_key, status, notes, first_seen FROM leads")}
     con.execute("DELETE FROM leads")
-    rank = {"strong": 5, "category": 4, "cafe": 3, "naics": 2, "weak": 1}
+    rank = {"strong": 6, "category": 5, "cafe": 4, "keyword": 3, "naics": 2, "weak": 1}
     for k, recs in groups.items():
         dates = sorted(r["event_date"] for r in recs if r["event_date"])
         best = max(recs, key=lambda r: (rank.get(r["match_level"], 0), len(r["address"] or "")))
@@ -458,6 +587,7 @@ def rebuild_leads(con):
             "chain": next((r["chain"] for r in recs if r["chain"]), ""),
         }
         lead["score"] = score(lead, today)
+        lead.update(opening_window(recs, src_by_id, today))
         st, nt, fs = existing.get(k, ("new", "", None))
         lead["status"], lead["notes"] = st, nt
         lead["first_seen"] = fs or min(r["first_seen"] for r in recs)
@@ -469,6 +599,7 @@ def rebuild_leads(con):
 def export_csv(con, path=CSV_FILE):
     cur = con.execute("""SELECT name, alt_names, address, city, state, zip, phone,
         first_event_date, last_event_date, signals, event_types, sources, record_count,
+        open_status, open_est_start, open_est_end, open_conf,
         match_level, chain, score, lat, lon, first_seen, status, lead_key
         FROM leads ORDER BY score DESC, first_event_date DESC""")
     with open(path, "w", newline="") as fh:

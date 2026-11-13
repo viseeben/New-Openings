@@ -63,6 +63,12 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .contact a{text-decoration:none;white-space:nowrap;margin-right:7px}
 .contact a:hover{text-decoration:underline}
 .conf{color:var(--muted);font-size:11px}
+.op{display:inline-block;font-size:11px;font-weight:600;border-radius:5px;padding:0 6px;white-space:nowrap}
+.op-up{background:var(--new-bg);color:var(--new)}
+.op-now{background:#fdecd8;color:#a8571a}
+.op-open{background:var(--chip);color:var(--muted)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .op-now{background:#3a2a17;color:#f0b072}}
+.op-range{font-size:12px;color:var(--muted);white-space:nowrap}
 .detail td{background:var(--row-hover);cursor:default}
 .detail .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px 18px}
 .detail dt{color:var(--muted);font-size:12px}.detail dd{margin:0 0 4px}
@@ -102,6 +108,9 @@ footer table{font-size:12px}
   </div>
   <select id="state"><option value="">All states</option></select>
   <select id="signal"><option value="">All signals</option></select>
+  <select id="opening" title="Estimated opening, from the type of record and its date">
+    <option value="">Any opening status</option><option>Upcoming</option><option>Opening now</option>
+    <option value="soon">Upcoming or opening now</option><option>Probably open</option></select>
   <select id="status"><option value="">Any status</option></select>
   <select id="contact"><option value="">Any contact info</option><option value="owner">Has owner name</option>
     <option value="instagram">Has Instagram</option><option value="email">Has email</option>
@@ -109,7 +118,7 @@ footer table{font-size:12px}
   <label class="chk"><input type="checkbox" id="hideChains" checked> Hide chains</label>
   <label class="chk">Min score <input type="number" id="minScore" value="0" min="0" max="100" step="5" style="width:64px"></label>
   <select id="sortSel" class="m-only" title="Sort">
-    <option value="score:-1">Sort: score</option><option value="first_event_date:-1">Sort: newest event</option>
+    <option value="score:-1">Sort: score</option><option value="open_est_start:1">Sort: soonest opening</option><option value="first_event_date:-1">Sort: newest event</option>
     <option value="first_seen:-1">Sort: newest found</option><option value="name:1">Sort: name</option><option value="city:1">Sort: city</option>
   </select>
   <button id="csv">Download CSV</button>
@@ -132,7 +141,8 @@ const COLUMNS = [
   {k:"name", t:"Shop"},
   {k:"city", t:"Location"},
   {k:"owner", t:"Owner & contact", cls:"c-hide"},
-  {k:"first_event_date", t:"Event date", num:true},
+  {k:"open_est_start", t:"Opening (est.)", num:true},
+  {k:"first_event_date", t:"Event date", num:true, cls:"c-hide"},
   {k:"signals", t:"Signals", cls:"c-hide"},
   {k:"first_seen", t:"Found", num:true, cls:"c-hide"},
   {k:"status", t:"Status"},
@@ -166,7 +176,7 @@ function sinceCut(days){
 
 function apply(){
   const q = $("q").value.trim().toLowerCase();
-  const st = $("state").value, sig = $("signal").value, stat = $("status").value;
+  const st = $("state").value, sig = $("signal").value, stat = $("status").value, op = $("opening").value;
   const ct = $("contact").value;
   const hide = $("hideChains").checked, min = +$("minScore").value||0;
   const days = +document.querySelector("#since .on").dataset.v;
@@ -174,11 +184,12 @@ function apply(){
   view = DATA.filter(l =>
     (!hide || !l.chain) && l.score>=min && (!st||l.state===st) &&
     (!sig||l.signals.includes(sig)) && (!stat||statusOf(l)===stat) &&
+    (!op || (op==="soon" ? ["Upcoming","Opening now"].includes(l.open_status) : l.open_status===op)) &&
     (!cut || l.first_seen.slice(0,10)>=cut) &&
     (!ct || (ct==="any" ? (l.owner||l.instagram||l.email||l.website) : l[ct])) &&
     (!q || l._hay.includes(q)));
   const k=sort.k, d=sort.dir;
-  view.sort((a,b)=>{ let x=k==="status"?statusOf(a):a[k], y=k==="status"?statusOf(b):b[k];
+  view.sort((a,b)=>{ let x=k==="status"?statusOf(a):k==="open_est_start"?opKey(a):a[k], y=k==="status"?statusOf(b):k==="open_est_start"?opKey(b):b[k];
     if(typeof x==="number"&&typeof y==="number") return (x-y)*d || (b.score-a.score);
     x=String(x||""); y=String(y||""); if(!x&&y) return 1; if(x&&!y) return -1;
     return x.localeCompare(y)*d || (b.score-a.score); });
@@ -199,13 +210,36 @@ function row(l){
      ${l.alt_names?`<div class="alt">${esc(l.alt_names.slice(0,90))}</div>`:""}</td>
    <td>${esc(l.address)}<div class="alt">${esc([l.city,l.state].filter(Boolean).join(", "))} ${esc(l.zip)}</div></td>
    <td class="c-hide contact">${contactCell(l)}</td>
-   <td class="num">${esc(l.first_event_date)}</td>
+   <td class="num">${openingCell(l)}</td>
+   <td class="num c-hide">${esc(l.first_event_date)}</td>
    <td class="c-hide">${sigs}</td>
    <td class="num c-hide">${esc(l.first_seen.slice(0,10))}</td>
    <td><select class="st" data-key="${l.lead_key}" onclick="event.stopPropagation()">${opts}</select></td>
   </tr>${open===l.lead_key?detail(l):""}`;
 }
 
+const OP_CLS = {"Upcoming":"op-up","Opening now":"op-now","Probably open":"op-open"};
+const fmtD = iso => iso ? new Date(iso+"T12:00:00").toLocaleDateString([], {month:"short", day:"numeric"}) : "";
+const yr = iso => iso ? iso.slice(0,4) : "";
+function opRange(l){
+  if(!l.open_est_start) return "";
+  if(l.open_est_start===l.open_est_end) return `${fmtD(l.open_est_start)}, ${yr(l.open_est_start)}`;
+  const y = yr(l.open_est_start)===yr(l.open_est_end) ? "" : ` ${yr(l.open_est_start)}`;
+  return `${fmtD(l.open_est_start)}${y} – ${fmtD(l.open_est_end)}, ${yr(l.open_est_end)}`;
+}
+// Sort key for "soonest opening": opening now, then upcoming (soonest first), then probably open (most recent first).
+const OP_RANK = {"Opening now":0,"Upcoming":1,"Probably open":2};
+function opKey(l){
+  const r = OP_RANK[l.open_status]; if(r===undefined) return "";
+  if(r<2) return `${r}${l.open_est_start}`;
+  const days = Math.max(0, Math.round((Date.now()-new Date(l.open_est_end+"T12:00:00"))/864e5));
+  return `2${String(days).padStart(6,"0")}`;
+}
+function openingCell(l){
+  if(!l.open_status) return "";
+  const low = l.open_conf==="low" ? ' <span class="conf">(rough)</span>' : "";
+  return `<span class="op ${OP_CLS[l.open_status]||""}">${esc(l.open_status)}</span>${low}<div class="op-range">${esc(opRange(l))}</div>`;
+}
 const igUrl = h => `https://www.instagram.com/${encodeURIComponent(h)}/`;
 const webUrl = w => /^https?:/i.test(w) ? w : "https://"+w;
 const host = w => { try { return new URL(webUrl(w)).hostname.replace(/^www\./,""); } catch { return w; } };
@@ -226,7 +260,8 @@ function contactCell(l){
 const SRC_LABEL = {chicago_business_owners:"Chicago business owner records", ct_principals:"CT business registry principals",
   oregon_sos:"Oregon SOS filing", colorado_business_entities:"Colorado SOS filing", ny_state_new_corporations:"NY DOS filing",
   ct_business_registrations:"CT business registry", tx_sales_tax_outlets:"TX sales tax permit", openstreetmap:"OpenStreetMap",
-  website:"the shop's website", web_search:"web search", manual:"checked by hand"};
+  website:"the shop's website", web_search:"web search", owner_search:"web search (news, LinkedIn, articles)",
+  manual:"checked by hand"};
 const srcLabel = s => SRC_LABEL[s] || s;
 
 function detail(l){
@@ -242,9 +277,12 @@ function detail(l){
       <dt>Match</dt><dd>${esc(l.match_level)} · ${l.record_count} record${l.record_count>1?"s":""}</dd></dl>
     <dl><dt>Signals</dt><dd>${l.signals.split(",").map(s=>esc(SIGNALS[s]||s)).join(", ")}</dd>
       <dt>Event types</dt><dd>${esc(l.event_types)||"—"}</dd>
+      <dt>Estimated opening</dt><dd>${l.open_status?`${esc(l.open_status)} · ${esc(opRange(l))} · ${esc(l.open_conf)} confidence<div class="alt">${esc(l.open_basis)}</div>`:"—"}</dd>
       <dt>Dates</dt><dd>${esc(l.first_event_date)}${l.last_event_date!==l.first_event_date?" → "+esc(l.last_event_date):""} · found ${esc(l.first_seen.slice(0,10))}</dd>
       <dt>Source</dt><dd>${srcs}</dd></dl>
     <dl><dt>Owner / officer</dt><dd>${l.owner?`${esc(l.owner)}${l.owner_role?` · ${esc(l.owner_role)}`:""}<div class="alt">from ${esc(srcLabel(l.owner_source))}</div>`:"—"}</dd>
+      ${l.web_owner && l.web_owner!==l.owner?`<dt>Owner found online</dt><dd>${esc(l.web_owner)}${l.web_owner_role?` · ${esc(l.web_owner_role)}`:""}${l.web_owner_url?`<div class="alt"><a href="${esc(l.web_owner_url)}" target="_blank" rel="noopener">see where it was found</a></div>`:""}</dd>`:""}
+      ${l.web_owner && l.web_owner===l.owner && l.web_owner_url?`<dt>Owner source</dt><dd class="alt"><a href="${esc(l.web_owner_url)}" target="_blank" rel="noopener">see where it was found</a></dd>`:""}
       ${l.owners_all && l.owners_all.includes(";")?`<dt>Other people on file</dt><dd>${esc(l.owners_all)}</dd>`:""}
       <dt>Instagram</dt><dd>${l.instagram?`<a href="${igUrl(l.instagram)}" target="_blank" rel="noopener">@${esc(l.instagram)}</a>${confTag(l.instagram_conf)}`:"—"}</dd>
       <dt>Website</dt><dd>${l.website?`<a href="${esc(webUrl(l.website))}" target="_blank" rel="noopener">${esc(host(l.website))}</a>`:"—"}</dd>
@@ -282,7 +320,7 @@ function stats(){
   $("sub").innerHTML = `New coffee shops from city and state permit, license and inspection data. Refreshed daily${when?` · last run ${when.toLocaleString([], {dateStyle:"medium", timeStyle:"short"})}`:""}.`;
   const runs = (META.runs||[]).map(r=>`<tr><td>${r.url?`<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.jurisdiction||r.source_id)}</a>`:esc(r.source_id)}</td><td class="num">${r.fetched??""}</td><td class="num">${r.matched??""}</td><td>${r.error?"⚠️ "+esc(r.error.slice(0,120)):"ok"}</td></tr>`).join("");
   $("foot").innerHTML = `<p><b>Last run by source</b></p><table><thead><tr><th>Source</th><th>Fetched</th><th>Coffee</th><th>Status</th></tr></thead><tbody>${runs}</tbody></table>
-   <p>Score 0–100: how clearly it's coffee + how close to opening the signal is + recency, minus 45 for chains. Owner names come from the public permit and business filings (often an officer or registered agent, so double-check). Instagram, websites and emails come from OpenStreetMap, the shop's own website, web search or hand checks; "(likely)" means the handle matched the name but wasn't confirmed. Status and notes are stored in this browser only; use Download CSV to keep them.</p>`;
+   <p>Score 0–100: how clearly it's coffee + how close to opening the signal is + recency, minus 45 for chains. Opening (est.) is a date range estimated from the type of record and its date (for example, pre-opening inspections usually come 0 to 6 weeks before opening); "(rough)" means it's based on a state business registration, which is the least precise. Owner names come from the public permit and business filings (often an officer or registered agent, so double-check), or from the shop's website and web search, with a link to where each was found. Instagram, websites and emails come from OpenStreetMap, the shop's own website, web search or hand checks; "(likely)" means the handle matched the name but wasn't confirmed. Status and notes are stored in this browser only; use Download CSV to keep them.</p>`;
 }
 
 function fillSelect(id, values, label=v=>v){
@@ -290,7 +328,7 @@ function fillSelect(id, values, label=v=>v){
 }
 
 function csv(){
-  const cols=["score","name","alt_names","address","city","state","zip","phone","owner","owner_role","owners_all","email","website","instagram","instagram_conf","facebook","tiktok","osm_phone","hours","shop_address","first_event_date","signals","sources","match_level","chain","first_seen"];
+  const cols=["score","name","alt_names","address","city","state","zip","phone","owner","owner_role","owners_all","email","website","instagram","instagram_conf","facebook","tiktok","osm_phone","hours","shop_address","web_owner","web_owner_role","web_owner_url","open_status","open_est_start","open_est_end","open_conf","first_event_date","signals","sources","match_level","chain","first_seen"];
   const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;
   const lines=[[...cols,"status","notes"].join(",")].concat(view.map(l=>[...cols.map(c=>q(l[c])),q(statusOf(l)),q(notesOf(l))].join(",")));
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/csv"}));
@@ -300,7 +338,7 @@ function csv(){
 fetch("leads.json",{cache:"no-cache"}).then(r=>r.json()).then(j=>{
   META=j;
   DATA=j.rows.map(r=>{const o={}; j.cols.forEach((c,i)=>o[c]=r[i]); o.score=+o.score||0; o.record_count=+o.record_count||0;
-    o._hay=[o.name,o.alt_names,o.address,o.city,o.state,o.zip,o.phone,o.owners_all||o.owner,o.instagram,o.email,o.website].join(" ").toLowerCase(); return o;});
+    o._hay=[o.name,o.alt_names,o.address,o.city,o.state,o.zip,o.phone,o.owners_all||o.owner,o.web_owner,o.instagram,o.email,o.website].join(" ").toLowerCase(); return o;});
   DATA._multiDay = new Set(DATA.map(l=>l.first_seen.slice(0,10))).size>1;
   fillSelect("state",[...new Set(DATA.map(l=>l.state).filter(Boolean))].sort());
   fillSelect("signal",Object.keys(SIGNALS).filter(s=>DATA.some(l=>l.signals.includes(s))),s=>SIGNALS[s]);
@@ -309,11 +347,11 @@ fetch("leads.json",{cache:"no-cache"}).then(r=>r.json()).then(j=>{
 }).catch(e=>{$("sub").textContent="Couldn't load leads.json: "+e;});
 
 let t; $("q").addEventListener("input",()=>{clearTimeout(t);t=setTimeout(apply,120);});
-["state","signal","status","contact","hideChains","minScore"].forEach(id=>$(id).addEventListener("change",apply));
+["state","signal","status","opening","contact","hideChains","minScore"].forEach(id=>$(id).addEventListener("change",apply));
 $("since").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b)return;
   document.querySelectorAll("#since button").forEach(x=>x.classList.toggle("on",x===b)); apply();});
 $("head").addEventListener("click",e=>{const th=e.target.closest("th"); if(!th)return; const k=th.dataset.k;
-  sort = sort.k===k?{k,dir:-sort.dir}:{k,dir:["name","city","status"].includes(k)?1:-1}; apply();});
+  sort = sort.k===k?{k,dir:-sort.dir}:{k,dir:["name","city","status","open_est_start"].includes(k)?1:-1}; apply();});
 $("body").addEventListener("click",e=>{const tr=e.target.closest("tr.lead"); if(!tr||e.target.closest("a,select,textarea"))return;
   open = open===tr.dataset.key?null:tr.dataset.key; render();});
 $("body").addEventListener("change",e=>{const k=e.target.dataset.key; if(!k)return;
