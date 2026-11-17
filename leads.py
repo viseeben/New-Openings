@@ -885,6 +885,13 @@ def cmd_stats(args):
             print("  ", r)
 
 
+def cmd_rebuild(args):
+    """Rebuild leads from stored records with the current code and filters (no fetching)."""
+    con = connect()
+    rebuild_leads(con)
+    export_csv(con)
+
+
 def main():
     p = argparse.ArgumentParser()
     sp = p.add_subparsers(dest="cmd", required=True)
@@ -899,8 +906,10 @@ def main():
     d.add_argument("target")
     d.add_argument("dataset", nargs="?")
     sp.add_parser("stats")
+    sp.add_parser("rebuild")
     a = p.parse_args()
-    {"run": cmd_run, "plan": cmd_plan, "discover": cmd_discover, "stats": cmd_stats}[a.cmd](a)
+    {"run": cmd_run, "plan": cmd_plan, "discover": cmd_discover, "stats": cmd_stats,
+     "rebuild": cmd_rebuild}[a.cmd](a)
 
 
 if __name__ == "__main__":

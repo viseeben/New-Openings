@@ -52,6 +52,12 @@ jobs:
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
         run: python3 leads.py run --days 365
 
+      # A run triggered by a code change doesn't fetch, but still re-applies the current
+      # filters, merges and opening estimates to the stored records.
+      - name: Rebuild leads with the current code
+        if: "!(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fetch) || hashFiles('coffee_leads.db') == '')"
+        run: python3 leads.py rebuild
+
       # Owner names, Instagram, websites, emails. Never fails the job: the page still builds.
       - name: Find owners, Instagram and websites
         continue-on-error: true
