@@ -1,6 +1,6 @@
 {
- "_help": "Cities discover.py searches each week for coffee shops announcing 'coming soon' on Instagram, Facebook and local news. Each city costs 3 Brave searches a week (about 13 a month). Add or remove [city, state] pairs.",
- "every_days": 6,
+ "_help": "Cities and searches for discover.py, which looks for coffee shops announcing 'coming soon'. Each week it spends 36 Brave searches: one of each type in 'searches' per city, rotating through the cities (4 types = 9 cities a week, every city every 4 weeks). Search types: news (local news), whatnow (What Now articles), instagram, facebook, tiktok (off by default: in testing it found little). Adding types or cities lengthens the rotation; it never adds searches.",
+ "every_days": 7,
  "cities": [
   [
    "New York",
@@ -146,5 +146,11 @@
    "Boise",
    "ID"
   ]
+ ],
+ "searches": [
+  "news",
+  "whatnow",
+  "instagram",
+  "facebook"
  ]
 }

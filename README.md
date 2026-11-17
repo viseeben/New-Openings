@@ -110,9 +110,9 @@ earlier but needs a quick check (Google/Instagram) to find the actual location.
   ahead) with no shop name, merged into the shop's license or inspection at the same address
   when that arrives. Permit contacts are mostly landlords and contractors, so they rank low.
 - **Facebook pages** are picked from the search results the search steps already fetch.
-- **Coming soon online** (`discover.py`, weekly, needs `BRAVE_API_KEY`): for each city in
-  `discovery.json`, three searches for coffee shops announcing "coming soon" on Instagram,
-  Facebook and local news. Only search results are read. Keeps the shop's name, link, a
+- **Coming soon online** (`discover.py`, weekly, needs `BRAVE_API_KEY`): 36 searches a week,
+  rotating through the cities in `discovery.json`, for coffee shops announcing "coming soon" in
+  local news, What Now articles, Instagram and Facebook (TikTok can be switched on there). Only search results are read. Keeps the shop's name, link, a
   street address and owner if mentioned, and an opening month if given ("opening in
   December" sets the estimate to December). Listicles, chains and non-coffee businesses are
   dropped; news must name the city. These merge into the shop's permit or license lead by
@@ -254,3 +254,16 @@ Source keys:
   people who never open. Score reflects that.
 - San Francisco's portal blocked browser requests during the first build, so
   it's not in yet.
+
+## Using the page (Nov 2026)
+
+- **Filters** (Opening, Type, Contact info, Signals, State, My status) each let you tick several
+  options. Contact info and Signals have an Any / All switch: *Any* = at least one ticked item,
+  *All* = every ticked item. Each option shows how many leads it would match.
+- **(i) boxes** explain how every filter, option and column is worked out. Hover (or tap on a phone).
+- **Views**: *High confidence* (opening now or upcoming, new businesses and new locations, owner
+  name known) is built in, and you can save your own. Saved views live in your browser. The page
+  link updates as you filter, so a link reopens the same view.
+- **Download CSV** exports exactly the leads on screen, ready for Clay.
+- **Brave search budget**: hard cap of 900 searches a month (`budget.py`), only on the scheduled
+  6am run. Merging a PR or running the workflow by hand never uses searches.

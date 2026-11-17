@@ -121,6 +121,8 @@ CHAINS = [
     "black rifle", "pj's", "cc's coffee", "joe coffee company", "think coffee",
     "birch coffee", "variety coffee", "partners coffee", "devocion", "maman", "ralph's coffee",
     "gloria jean", "dunn bros", "tea-rek'z",
+    "7brew", "la la land", "bitty & beau", "bitty and beau", "daydreamer coffee", "better buzz",
+    "lucky goat coffee", "spiller park",
 ]
 # Places that serve coffee but are not independent coffee shops: never leads.
 NON_SHOP = [
