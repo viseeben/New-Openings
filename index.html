@@ -74,6 +74,26 @@ td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
 .detail dt{color:var(--muted);font-size:12px}.detail dd{margin:0 0 4px}
 .detail textarea{width:100%;min-height:54px;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px}
 .m-only{display:none}
+.i{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;border:1px solid var(--muted);color:var(--muted);font:600 10px/1 Georgia,serif;font-style:italic;cursor:help;margin-left:4px;vertical-align:1px;flex:none}
+.i:hover{border-color:var(--accent);color:var(--accent)}
+#tip{position:fixed;z-index:50;max-width:320px;background:var(--ink);color:var(--bg);font-size:12px;line-height:1.45;padding:8px 10px;border-radius:8px;pointer-events:none;box-shadow:0 4px 18px rgba(0,0,0,.18);display:none;white-space:pre-line}
+.ms{position:relative}
+.ms>button{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.ms>button.act{border-color:var(--accent);color:var(--accent);font-weight:600}
+.ms .pan{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:30;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.14);padding:8px;min-width:270px;max-height:420px;overflow:auto}
+.ms.open .pan{display:block}
+.pan label{display:flex;align-items:center;gap:7px;padding:4px 6px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.pan label:hover{background:var(--row-hover)}
+.pan .n{margin-left:auto;padding-left:12px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.pan .top{display:flex;gap:6px;align-items:center;justify-content:space-between;padding:2px 4px 8px;border-bottom:1px solid var(--line);margin-bottom:6px;font-size:12px;color:var(--muted)}
+.pan .top button{padding:2px 7px;font-size:12px}
+.pan .seg button{padding:2px 8px;font-size:12px}
+.views{display:flex;gap:6px;align-items:center;flex-wrap:wrap;max-width:1400px;margin:0 auto;padding:0 16px 10px}
+.views .vw{font-size:12px;padding:3px 10px;border-radius:999px}
+.views .vw.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.views .vw .x{margin-left:6px;opacity:.6}
+.views .lbl{font-size:12px;color:var(--muted)}
+.stat.click{cursor:pointer}.stat.click:hover{border-color:var(--accent)}
 .more{display:block;margin:14px auto}
 .more[hidden]{display:none}
 footer{max-width:1400px;margin:0 auto;padding:0 16px 30px;color:var(--muted);font-size:12px}
@@ -103,30 +123,25 @@ footer table{font-size:12px}
 </header>
 <div class="controls"><div class="controls-in">
   <input type="search" id="q" placeholder="Search name, owner, address, city, zip, @handle…" autocomplete="off">
-  <div class="seg" id="since" title="First seen by the daily job">
+  <div class="seg" id="since">
     <button data-v="1">New today</button><button data-v="7">7d</button><button data-v="30">30d</button><button data-v="0" class="on">All</button>
-  </div>
-  <select id="state"><option value="">All states</option></select>
-  <select id="signal"><option value="">All signals</option></select>
-  <select id="opening" title="Estimated opening, from the type of record and its date">
-    <option value="">Any opening status</option><option>Upcoming</option><option>Opening now</option>
-    <option value="soon">Upcoming or opening now</option><option>Probably open</option><option>Already open</option></select>
-  <select id="ltype" title="Is it a new business, a new location of a brand, or a shop that was already open?">
-    <option value="fresh" selected>New businesses + new locations</option><option value="new">New businesses only</option>
-    <option>New location of existing brand</option><option value="open">Already open / existing shops</option>
-    <option value="">Any type</option></select>
-  <select id="status"><option value="">Any status</option></select>
-  <select id="contact"><option value="">Any contact info</option><option value="owner">Has owner name</option>
-    <option value="instagram">Has Instagram</option><option value="email">Has email</option>
-    <option value="website">Has website</option><option value="any">Has any of these</option></select>
-  <label class="chk"><input type="checkbox" id="hideChains" checked> Hide chains</label>
-  <label class="chk">Min score <input type="number" id="minScore" value="0" min="0" max="100" step="5" style="width:64px"></label>
+  </div><span class="i" data-tip="since">i</span>
+  <div class="ms" id="f-opening"></div>
+  <div class="ms" id="f-ltype"></div>
+  <div class="ms" id="f-contact"></div>
+  <div class="ms" id="f-signal"></div>
+  <div class="ms" id="f-state"></div>
+  <div class="ms" id="f-status"></div>
+  <label class="chk"><input type="checkbox" id="hideChains" checked> Hide chains<span class="i" data-tip="hideChains">i</span></label>
+  <label class="chk">Min score <input type="number" id="minScore" value="0" min="0" max="100" step="5" style="width:64px"><span class="i" data-tip="score">i</span></label>
   <select id="sortSel" class="m-only" title="Sort">
     <option value="score:-1">Sort: score</option><option value="open_est_start:1">Sort: soonest opening</option><option value="first_event_date:-1">Sort: newest event</option>
     <option value="first_seen:-1">Sort: newest found</option><option value="name:1">Sort: name</option><option value="city:1">Sort: city</option>
   </select>
-  <button id="csv">Download CSV</button>
-</div></div>
+  <button id="csv" title="Downloads exactly the leads you're looking at, for example to upload to Clay">Download CSV</button>
+</div>
+<div class="views" id="views"></div></div>
+<div id="tip"></div>
 <main>
   <div class="count" id="count"></div>
   <table id="tbl"><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
@@ -178,32 +193,152 @@ function sinceCut(days){
   return new Date(last - (days-1)*864e5).toISOString().slice(0,10);
 }
 
+// ---------- Info text for the (i) boxes ----------
+const TIP = {
+  since: "When the tool first found this shop (not the date on the record).\nNew today = added by the latest daily run.",
+  score: "0 to 100. Adds up:\n- How clearly it's coffee (name says coffee/espresso/cafe ranks highest)\n- The strongest signal (pre-opening inspection 40, food permit 35, plan review 35, building permit 25, business license 25, coming soon post 25, state filing 15, routine inspection 10)\n- +10 if two or more kinds of records agree\n- Recency (+20 if within 30 days, +12 within 90, +5 within 180)\n- +3 if a phone number is on file\n- Minus 45 for chains, minus 35 if proven already open, minus 15 if probably already open",
+  hideChains: "Hides known chains and franchises (Starbucks, Dunkin, 7 Brew, Scooter's, etc.) and any brand opening 4 or more new storefronts on the list.",
+  opening: "Estimated from the kind of record and its date. Each record type has a typical lead time (hover each option). The tool picks the most precise record the shop has.",
+  ltype: "Is this really a new shop? Checked against earlier inspections at the same address under the same name (NYC, Chicago), review counts found online, Google (if set up) and OpenStreetMap. A different business at the same address (like a closed IHOP) does NOT count against a shop.",
+  contact: "What we already know about the owner and how to reach them.\nAny = at least one checked item. All = every checked item.\nFor Clay: owner name + website or Instagram gives Clay the most to work with.",
+  signal: "Which public records or posts put this shop on the list.\nAny = has at least one checked signal. All = has every checked signal (good for testing combinations).",
+  state: "State of the shop's address.",
+  status: "Your own status for the lead. Saved in this browser only.",
+  views: "A view saves every filter, the search box and the sort. Saved views live in this browser. The page link also updates as you filter, so you can bookmark it or send it to someone."
+};
+const OPT_TIP = {
+  opening: {
+    "Upcoming": "Today is before the estimated opening window starts. The shop hasn't opened yet.",
+    "Opening now": "Today falls inside the estimated opening window. Best time to reach out.",
+    "Probably open": "The estimated window has passed. The shop has likely opened, possibly recently.",
+    "Already open": "Evidence the shop was already trading: same business name inspected at this address more than 90 days before, 60+ online reviews, or Google lists it open with 10+ reviews.",
+    "(no estimate)": "No record with a usable date."},
+  ltype: {
+    "New business": "No sign of an earlier shop with this name. The best prospects.",
+    "New location of existing brand": "The name already has other storefronts (an existing independent opening another location).",
+    "Existing shop (new permit or owner)": "Same business seen here before. Usually a renewal, remodel or change of owner rather than an opening.",
+    "Already open": "Proven open before the record that put it on the list (see Opening info).",
+    "Chain / franchise": "Known chain or franchise."},
+  contact: {
+    owner: "A person's name. From permit or business filings (often an officer or registered agent, so double-check) or found online.",
+    web_owner: "Owner or founder named in news, LinkedIn or the shop's own website, with a link to where it was found. Usually the real operator.",
+    phone: "Phone number from the permit record or OpenStreetMap. Often the shop or the applicant.",
+    instagram: "Instagram handle. From OpenStreetMap, the shop's website or web search.",
+    facebook: "Facebook page found in web search results.",
+    website: "The shop's own website.",
+    email: "Email address found on the shop's website or in records.",
+    no_owner: "No owner name found yet (from any source).",
+    none: "No owner, phone, Instagram, Facebook, website or email yet."},
+  signal: {
+    pre_opening_inspection: "Health department inspection required before a food business may open. Usually 0 to 6 weeks before opening. Strongest signal. (NYC, Chicago, Montgomery County MD)",
+    new_food_permit: "New food service permit issued. Usually right around opening, within about a month. (Austin, Cincinnati, Raleigh area, Seattle area, NY State)",
+    plan_review: "Health department reviews the kitchen and floor plans. Usually 2 to 5 months before opening.",
+    building_permit: "Build-out or renovation permit mentioning coffee, cafe, espresso, boba or matcha. Usually 2 to 6 months before opening. (Chicago)",
+    new_business_license: "City business license issued. Usually from 2 weeks before to 6 weeks after opening. (15 cities)",
+    business_registration: "New LLC or trade name filed with the state. Usually 3 to 9 months before opening, and some never open. Least precise.",
+    inspection: "Routine health inspection, first one on record. Usually means the shop is already open.",
+    coming_soon: "The shop announced 'coming soon' on Instagram, Facebook, TikTok or in local news. Most open within 1 to 4 months. If the post names a month, that month is used."}
+};
+
+// ---------- Multi-select filters ----------
+const isOld = l => ["Already open","Existing shop (new permit or owner)"].includes(l.lead_type);
+const CONTACT = {owner:"Owner name", web_owner:"Owner found online", phone:"Phone", instagram:"Instagram",
+  facebook:"Facebook", website:"Website", email:"Email", no_owner:"No owner name yet", none:"Nothing yet"};
+const hasC = (l,k) => k==="phone" ? !!phoneOf(l) : k==="no_owner" ? !l.owner : k==="none" ? !(l.owner||phoneOf(l)||l.instagram||l.facebook||l.website||l.email) : !!l[k];
+const FILTERS = {
+  opening: {label:"Opening", opts:()=>["Upcoming","Opening now","Probably open","Already open","(no estimate)"],
+    test:(l,v)=> v==="(no estimate)" ? !l.open_status : l.open_status===v},
+  ltype: {label:"Type", opts:()=>["New business","New location of existing brand","Existing shop (new permit or owner)","Already open","Chain / franchise"]
+      .filter(v=>v==="New business"||DATA.some(l=>l.lead_type===v)),
+    test:(l,v)=> (l.lead_type||"New business")===v, def:["New business","New location of existing brand"]},
+  contact: {label:"Contact info", mode:true, opts:()=>Object.keys(CONTACT), name:k=>CONTACT[k], test:hasC},
+  signal: {label:"Signals", mode:true, opts:()=>Object.keys(SIGNALS).filter(s=>DATA.some(l=>l.signals.includes(s))),
+    name:k=>SIGNALS[k], test:(l,v)=>l.signals.split(",").includes(v)},
+  state: {label:"State", opts:()=>[...new Set(DATA.map(l=>l.state).filter(Boolean))].sort(), test:(l,v)=>l.state===v},
+  status: {label:"My status", opts:()=>STATUSES, test:(l,v)=>statusOf(l)===v},
+};
+let SEL = {};   // {filterId: {v:[...], mode:"any"|"all"}}
+function defaults(){ SEL={}; for(const [id,f] of Object.entries(FILTERS)) SEL[id]={v:[...(f.def||[])], mode:"any"}; }
+defaults();
+const passF = (l,id) => { const s=SEL[id], f=FILTERS[id]; if(!s.v.length) return true;
+  return s.mode==="all" ? s.v.every(v=>f.test(l,v)) : s.v.some(v=>f.test(l,v)); };
+
+function msLabel(id){ const f=FILTERS[id], s=SEL[id], nm=f.name||(v=>v);
+  if(!s.v.length) return `${f.label}: any`;
+  if(s.v.length===1) return `${f.label}: ${nm(s.v[0])}`;
+  return `${f.label}: ${s.v.length} ${s.mode==="all"?"(all)":"selected"}`; }
+function buildMS(id){
+  const f=FILTERS[id], s=SEL[id], el=$("f-"+id), nm=f.name||(v=>v);
+  const wasOpen = el.classList.contains("open");
+  // counts: leads that pass every OTHER filter and also have this option
+  const base = DATA.filter(l => passBase(l) && Object.keys(FILTERS).every(o=>o===id||passF(l,o)));
+  const opts = f.opts().map(v=>{ const n=base.filter(l=>f.test(l,v)).length; const tip=OPT_TIP[id]?.[v];
+    return `<label><input type="checkbox" value="${esc(v)}" ${s.v.includes(v)?"checked":""}>${esc(nm(v))}${tip?`<span class="i" data-otip="${id}|${esc(v)}">i</span>`:""}<span class="n">${n.toLocaleString()}</span></label>`; }).join("");
+  const mode = f.mode ? `<span class="seg" data-mode><button data-m="any" class="${s.mode==="any"?"on":""}">Any</button><button data-m="all" class="${s.mode==="all"?"on":""}">All</button></span>` : "";
+  el.innerHTML = `<button type="button" class="${s.v.length?"act":""}">${esc(msLabel(id))} ▾</button>
+    <div class="pan"><div class="top"><span>${esc(f.label)}<span class="i" data-tip="${id}">i</span></span>${mode}<button type="button" data-clear>Clear</button></div>${opts}</div>`;
+  el.classList.toggle("open", wasOpen);
+}
+function passBase(l){
+  const q=$("q").value.trim().toLowerCase(), hide=$("hideChains").checked, min=+$("minScore").value||0;
+  const cut=sinceCut(+document.querySelector("#since .on").dataset.v);
+  return (!hide||!l.chain) && l.score>=min && (!cut||l.first_seen.slice(0,10)>=cut) && (!q||l._hay.includes(q));
+}
+
 function apply(){
-  const q = $("q").value.trim().toLowerCase();
-  const st = $("state").value, sig = $("signal").value, stat = $("status").value, op = $("opening").value, lt = $("ltype").value;
-  const isOld = l => ["Already open","Existing shop (new permit or owner)"].includes(l.lead_type);
-  const ct = $("contact").value;
-  const hide = $("hideChains").checked, min = +$("minScore").value||0;
-  const days = +document.querySelector("#since .on").dataset.v;
-  const cut = sinceCut(days);
-  view = DATA.filter(l =>
-    (!hide || !l.chain) && l.score>=min && (!st||l.state===st) &&
-    (!sig||l.signals.includes(sig)) && (!stat||statusOf(l)===stat) &&
-    (!op || (op==="soon" ? ["Upcoming","Opening now"].includes(l.open_status) : l.open_status===op)) &&
-    (!lt || (lt==="fresh" ? !isOld(l) : lt==="new" ? (l.lead_type||"New business")==="New business" : lt==="open" ? isOld(l) : l.lead_type===lt)) &&
-    (!cut || l.first_seen.slice(0,10)>=cut) &&
-    (!ct || (ct==="any" ? (l.owner||l.instagram||l.email||l.website) : l[ct])) &&
-    (!q || l._hay.includes(q)));
+  view = DATA.filter(l => passBase(l) && Object.keys(FILTERS).every(id=>passF(l,id)));
   const k=sort.k, d=sort.dir;
   view.sort((a,b)=>{ let x=k==="status"?statusOf(a):k==="open_est_start"?opKey(a):a[k], y=k==="status"?statusOf(b):k==="open_est_start"?opKey(b):b[k];
     if(typeof x==="number"&&typeof y==="number") return (x-y)*d || (b.score-a.score);
     x=String(x||""); y=String(y||""); if(!x&&y) return 1; if(x&&!y) return -1;
     return x.localeCompare(y)*d || (b.score-a.score); });
-  shown = PAGE; render();
+  Object.keys(FILTERS).forEach(buildMS);
+  shown = PAGE; render(); renderViews(); saveHash();
+}
+
+// ---------- Views ----------
+const PRESETS = [
+  {name:"High confidence", builtin:true, tip:"Opening now or upcoming, new businesses and new locations only, with an owner name. Start here for Clay.",
+   st:{sel:{opening:{v:["Upcoming","Opening now"],mode:"any"}, ltype:{v:["New business","New location of existing brand"],mode:"any"}, contact:{v:["owner"],mode:"any"}}, hideChains:true, minScore:0, since:"0", q:"", sort:{k:"open_est_start",dir:1}}},
+  {name:"Opening soon, no owner yet", builtin:true, tip:"Opening now or upcoming new shops still missing an owner name. Candidates for manual research.",
+   st:{sel:{opening:{v:["Upcoming","Opening now"],mode:"any"}, ltype:{v:["New business","New location of existing brand"],mode:"any"}, contact:{v:["no_owner"],mode:"any"}}, hideChains:true, minScore:0, since:"0", q:"", sort:{k:"score",dir:-1}}},
+  {name:"Default", builtin:true, tip:"New businesses and new locations, everything else open.", st:{sel:{}, hideChains:true, minScore:0, since:"0", q:"", sort:{k:"score",dir:-1}}},
+];
+function getState(){ return {sel:JSON.parse(JSON.stringify(SEL)), hideChains:$("hideChains").checked, minScore:+$("minScore").value||0,
+  since:document.querySelector("#since .on").dataset.v, q:$("q").value, sort:{...sort}}; }
+function setState(st){
+  defaults();
+  for(const [id,v] of Object.entries(st.sel||{})) if(SEL[id]) SEL[id]={v:[...(v.v||[])], mode:v.mode||"any"};
+  if(st.sel && !st.sel.ltype && !("ltype" in st.sel)) SEL.ltype={v:[...FILTERS.ltype.def],mode:"any"};
+  $("hideChains").checked = st.hideChains!==false; $("minScore").value = st.minScore||0; $("q").value = st.q||"";
+  document.querySelectorAll("#since button").forEach(b=>b.classList.toggle("on", b.dataset.v===String(st.since||"0")));
+  if(st.sort) sort={...st.sort};
+  apply();
+}
+const sameState = (a,b) => JSON.stringify(norm(a))===JSON.stringify(norm(b));
+function norm(st){ const s=JSON.parse(JSON.stringify(st)); const sel={};
+  for(const id of Object.keys(FILTERS)){ const v=(s.sel||{})[id]||{v:id==="ltype"?FILTERS.ltype.def:[],mode:"any"}; sel[id]={v:[...v.v].sort(),mode:v.v.length?v.mode:"any"}; }
+  return {sel, hideChains:s.hideChains!==false, minScore:+s.minScore||0, since:String(s.since||"0"), q:s.q||""}; }
+function myViews(){ try { return JSON.parse(localStorage.getItem("leadViews")||"[]"); } catch { return []; } }
+function saveViews(v){ try { localStorage.setItem("leadViews", JSON.stringify(v)); } catch {} }
+function renderViews(){
+  const cur=getState(), all=[...PRESETS, ...myViews()];
+  $("views").innerHTML = `<span class="lbl">Views<span class="i" data-tip="views">i</span></span>` +
+    all.map((v,i)=>`<button class="vw ${sameState(v.st,cur)?"on":""}" data-vi="${i}" ${v.tip?`title="${esc(v.tip)}"`:""}>${esc(v.name)}${v.builtin?"":`<span class="x" data-del="${i-PRESETS.length}" title="Delete this view">✕</span>`}</button>`).join("") +
+    `<button class="vw" id="saveView">+ Save current view</button>`;
+}
+function saveHash(){ try { history.replaceState(null,"","#"+encodeURIComponent(JSON.stringify(norm(getState())).replace(/^/,"")) + "&sort=" + sort.k + ":" + sort.dir); } catch {} }
+function loadHash(){
+  if(location.hash.length<3) return false;
+  try { const [js,so]=decodeURIComponent(location.hash.slice(1)).split("&sort=");
+    const st=JSON.parse(js); if(so){const [k,d]=so.split(":"); st.sort={k,dir:+d};} setState(st); return true; } catch { return false; }
 }
 
 function head(){
-  $("head").innerHTML = COLUMNS.map(c=>`<th data-k="${c.k}" class="${sort.k===c.k?"sorted":""}">${c.t}${sort.k===c.k?`<span class="arr">${sort.dir>0?"▲":"▼"}</span>`:""}</th>`).join("");
+  const HT = {score:TIP.score, open_est_start:"Opening (est.):\n"+Object.entries(OPT_TIP.opening).map(([k,v])=>k+": "+v).join("\n\n"),
+    signals:TIP.signal, owner:"Owner name, Instagram, website, email and phone found so far. '(likely)' = the Instagram handle matched the name but wasn't confirmed.",
+    first_event_date:"Date on the record that put the shop on the list (inspection, permit, license or post date).", first_seen:TIP.since};
+  $("head").innerHTML = COLUMNS.map(c=>`<th data-k="${c.k}" class="${sort.k===c.k?"sorted":""}">${c.t}${HT[c.k]?`<span class="i" data-htip="${esc(HT[c.k])}">i</span>`:""}${sort.k===c.k?`<span class="arr">${sort.dir>0?"▲":"▼"}</span>`:""}</th>`).join("");
 }
 
 function row(l){
@@ -321,11 +456,14 @@ function stats(){
   const hot = ind.filter(l=>l.score>=80).length;
   const states = new Set(DATA.map(l=>l.state).filter(Boolean)).size;
   const withOwner = ind.filter(l=>l.owner).length, withIg = ind.filter(l=>l.instagram).length;
+  const hiConf = ind.filter(l=>["Upcoming","Opening now"].includes(l.open_status) && !isOld(l) && l.owner).length;
   $("stats").innerHTML = [
     [ind.length.toLocaleString(),"independent leads"],[hot.toLocaleString(),"score 80+"],
     [fresh.toLocaleString(),"new in last run"],[states,"states"],
-    [withOwner.toLocaleString(),"with owner name"],[withIg.toLocaleString(),"with Instagram"]]
-    .map(([b,s])=>`<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+    [withOwner.toLocaleString(),"with owner name"],[withIg.toLocaleString(),"with Instagram"],
+    [hiConf.toLocaleString(),"high confidence ▸", "hc"]]
+    .map(([b,s,c])=>`<div class="stat ${c?"click":""}" ${c?`id="${c}" title="${esc(PRESETS[0].tip)}"`:""}><b>${b}</b><span>${s}</span></div>`).join("");
+  $("hc").onclick=()=>setState(PRESETS[0].st);
   const when = META.last_run ? new Date(META.last_run+"Z") : null;
   $("sub").innerHTML = `New coffee shops from city and state permit, license and inspection data. Refreshed daily${when?` · last run ${when.toLocaleString([], {dateStyle:"medium", timeStyle:"short"})}`:""}.`;
   const runs = (META.runs||[]).map(r=>`<tr><td>${r.url?`<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.jurisdiction||r.source_id)}</a>`:esc(r.source_id)}</td><td class="num">${r.fetched??""}</td><td class="num">${r.matched??""}</td><td>${r.error?"⚠️ "+esc(r.error.slice(0,120)):"ok"}</td></tr>`).join("");
@@ -350,17 +488,50 @@ fetch("leads.json",{cache:"no-cache"}).then(r=>r.json()).then(j=>{
   DATA=j.rows.map(r=>{const o={}; j.cols.forEach((c,i)=>o[c]=r[i]); o.score=+o.score||0; o.record_count=+o.record_count||0;
     o._hay=[o.name,o.alt_names,o.address,o.city,o.state,o.zip,o.phone,o.owners_all||o.owner,o.web_owner,o.instagram,o.email,o.website].join(" ").toLowerCase(); return o;});
   DATA._multiDay = new Set(DATA.map(l=>l.first_seen.slice(0,10))).size>1;
-  fillSelect("state",[...new Set(DATA.map(l=>l.state).filter(Boolean))].sort());
-  fillSelect("signal",Object.keys(SIGNALS).filter(s=>DATA.some(l=>l.signals.includes(s))),s=>SIGNALS[s]);
-  fillSelect("status",STATUSES);
-  stats(); apply();
+  stats(); if(!loadHash()) apply();
 }).catch(e=>{$("sub").textContent="Couldn't load leads.json: "+e;});
 
 let t; $("q").addEventListener("input",()=>{clearTimeout(t);t=setTimeout(apply,120);});
-["state","signal","status","opening","ltype","contact","hideChains","minScore"].forEach(id=>$(id).addEventListener("change",apply));
+["hideChains","minScore"].forEach(id=>$(id).addEventListener("change",apply));
+// multi-select dropdowns
+document.addEventListener("click",e=>{
+  const ms=e.target.closest(".ms");
+  document.querySelectorAll(".ms.open").forEach(x=>{ if(x!==ms) x.classList.remove("open"); });
+  if(!ms) return;
+  const id=ms.id.slice(2);
+  if(e.target.closest(".ms>button")){ ms.classList.toggle("open"); return; }
+  if(e.target.closest("[data-clear]")){ SEL[id]={v:[],mode:"any"}; apply(); return; }
+  const m=e.target.closest("[data-m]"); if(m){ SEL[id].mode=m.dataset.m; apply(); return; }
+});
+document.addEventListener("change",e=>{
+  const ms=e.target.closest(".ms"); if(!ms||!e.target.matches("input[type=checkbox]")) return;
+  const id=ms.id.slice(2), v=e.target.value, s=SEL[id];
+  s.v = e.target.checked ? [...new Set([...s.v,v])] : s.v.filter(x=>x!==v); apply();
+});
+// views
+$("views").addEventListener("click",e=>{
+  const del=e.target.closest("[data-del]");
+  if(del){ e.stopPropagation(); const v=myViews(); v.splice(+del.dataset.del,1); saveViews(v); renderViews(); return; }
+  if(e.target.closest("#saveView")){ const name=prompt("Name this view (for example: Pre-opening + owner)"); if(!name) return;
+    const v=myViews().filter(x=>x.name!==name); v.push({name, st:getState()}); saveViews(v); renderViews(); return; }
+  const b=e.target.closest("[data-vi]"); if(!b) return;
+  setState([...PRESETS, ...myViews()][+b.dataset.vi].st);
+});
+// (i) info boxes: hover on desktop, tap on phones
+function showTip(el){ const t=$("tip"); let txt="";
+  if(el.dataset.tip) txt=TIP[el.dataset.tip]||""; else if(el.dataset.otip){ const [id,v]=el.dataset.otip.split("|"); txt=OPT_TIP[id]?.[v]||""; }
+  else if(el.dataset.htip) txt=el.dataset.htip;
+  if(!txt) return; t.textContent=txt; t.style.display="block";
+  const r=el.getBoundingClientRect(), w=t.offsetWidth, h=t.offsetHeight;
+  let x=Math.min(Math.max(8, r.left+r.width/2-w/2), innerWidth-w-8), y=r.bottom+8; if(y+h>innerHeight-8) y=r.top-h-8;
+  t.style.left=x+"px"; t.style.top=y+"px"; }
+document.addEventListener("mouseover",e=>{ const el=e.target.closest(".i"); if(el) showTip(el); });
+document.addEventListener("mouseout",e=>{ if(e.target.closest(".i")) $("tip").style.display="none"; });
+document.addEventListener("click",e=>{ const el=e.target.closest(".i"); if(el){ e.preventDefault(); showTip(el); } }, true);
+addEventListener("scroll",()=>{$("tip").style.display="none";},{passive:true});
 $("since").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b)return;
   document.querySelectorAll("#since button").forEach(x=>x.classList.toggle("on",x===b)); apply();});
-$("head").addEventListener("click",e=>{const th=e.target.closest("th"); if(!th)return; const k=th.dataset.k;
+$("head").addEventListener("click",e=>{const th=e.target.closest("th"); if(!th||e.target.closest(".i"))return; const k=th.dataset.k;
   sort = sort.k===k?{k,dir:-sort.dir}:{k,dir:["name","city","status","open_est_start"].includes(k)?1:-1}; apply();});
 $("body").addEventListener("click",e=>{const tr=e.target.closest("tr.lead"); if(!tr||e.target.closest("a,select,textarea"))return;
   open = open===tr.dataset.key?null:tr.dataset.key; render();});

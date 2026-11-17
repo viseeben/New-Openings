@@ -49,14 +49,17 @@ RUN_ID = "web_discovery"
 
 COMING = re.compile(r"coming soon|opening soon|soft[- ]open|grand opening|set to open|plans? to open|"
                     r"will open|to open (?:in|on|this|next|later|soon)|opening (?:this|next|in|on|day|date)|"
-                    r"now hiring|is opening|readies|debuts?\b|lease signed|signed a lease|under construction", re.I)
-COFFEE = re.compile(r"\b(coffee|espresso|caf[eé]|caffe|matcha|boba|bubble tea|roaster[sy]?|latte|tea house|"
-                    r"teahouse|kaffe)\b", re.I)
+                    r"now hiring|is opening|readies|debuts?\b|lease signed|signed a lease|under construction|"
+                    r"(?:preparing|getting ready|expected|slated|hop(?:es|ing)|aim(?:s|ing)|set|planning|gearing up) to open|"
+                    r"set to debut|forthcoming|in the works|first brick-and-mortar|brick-and-mortar|coming to|heading to|"
+                    r"opening date|expanding (?:to|into)|new location", re.I)
+COFFEE = re.compile(r"\b(coffee|espresso|caf[eé]|caffe|kafe|koffee|matcha|boba|bubble tea|roaster[sy]?|latte|tea house|"
+                    r"teahouse|kaffe|coffeehouse)\b", re.I)
 LISTICLE = re.compile(r"\b(best|top \d+|\d+ (?:new|hot|great|best)|guide|where to|openings|closings|"
                       r"round-?up|restaurants|things to do|what's new|this week|this month)\b", re.I)
 JUNK_NAME = re.compile(r"^(instagram|facebook|home|photos?|videos?|posts?|reels?|coming soon|new|the)$", re.I)
 MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
-OPEN_HINT = re.compile(rf"(?:open(?:s|ing)?|coming|debut(?:s|ing)?|launch(?:es|ing)?)\s+(?:on|in|by|this|early|late|mid-?)?\s*"
+OPEN_HINT = re.compile(rf"(?:open(?:s|ing)?|coming|debut(?:s|ing)?|launch(?:es|ing)?)\s+(?:on|in|by|before|this|early|late|mid-?)?\s*"
                        rf"((?:early |late |mid-?)?(?:{MONTHS}(?:\s+\d{{1,2}}(?:st|nd|rd|th)?)?(?:,?\s+20\d\d)?|"
                        rf"(?:this|next) (?:week|month|spring|summer|fall|winter)|spring|summer|fall|winter))", re.I)
 ADDRESS = re.compile(r"\b(\d{2,5}\s+(?:[NSEW]\.?\s+)?(?:[A-Z0-9][\w'.]*\s+){1,3}"
@@ -75,6 +78,16 @@ DEFAULT_CITIES = [
 ]
 
 
+# name -> (parser, query, freshness: pd/pw/pm/py = past day/week/month/year)
+SEARCHES = {
+    "news": ("news", 'new coffee shop "coming soon" OR "set to open" OR "opening soon" {city}', "pm"),
+    "whatnow": ("news", 'site:whatnow.com coffee {city}', "pm"),
+    "instagram": ("instagram", 'site:instagram.com "coming soon" coffee {city}', "py"),
+    "facebook": ("facebook", 'site:facebook.com "coming soon" coffee shop {city}', "py"),
+    "tiktok": ("tiktok", 'site:tiktok.com coffee shop "coming soon" {city}', "py"),
+}
+
+
 def load_config():
     try:
         cfg = json.load(open(CONFIG))
@@ -82,7 +95,7 @@ def load_config():
         cfg = {}
     cfg.setdefault("cities", DEFAULT_CITIES)
     cfg.setdefault("every_days", 7)
-    cfg.setdefault("cities_per_week", 12)
+    cfg.setdefault("searches", ["news", "whatnow", "instagram", "facebook"])
     return cfg
 
 
@@ -99,8 +112,64 @@ def brave(q, key, freshness=None):
              "age": x.get("page_age") or ""} for x in (data.get("web") or {}).get("results", [])]
 
 
-def name_from(kind, title, url):
-    """Pull the business name out of a result title."""
+HEAD_VERB = (r"to open|opening|is opening|will open|set to open|sets|coming|plans|planned|brings|bringing|debuts?|"
+             r"debuting|lands|opens|readies|signs|eyes|heads|heading|expands|expanding|takes over|launch(?:es|ing)?|"
+             r"joins|joining|targets|arrives|arriving|brews up|brewing|preparing|gears up|nears|nearing|slated|returns")
+LEAD_JUNK = re.compile(r"^(?:(?:new|local|beloved|popular|upcoming|viral|family-owned|black-owned|woman-owned|"
+                       r"[\w]+-(?:inspired|based|style|owned)|the)\s+)+", re.I)
+COFFEE_WORD = r"(?:Coffee|Café|Cafe|Caffe|Kafe|Koffee|Espresso|Roasters?|Roastery|Roasting|Tea|Teahouse|Boba|Matcha|Coffeehouse|Kaffe)"
+GENERIC = re.compile(rf"^(?:(?:a|an|the|new|cuban|coffee|shop|specialty|local|independent|drive-thru|neighborhood|"
+                     rf"cafe|café|tea|boba|bar|house|spot|concept|chain|brand|first|second|third)\s*)+$", re.I)
+SENT_PATTERNS = [
+    r"(?i:called|named|dubbed)\s+([A-Z][\w'’&.\-]*(?:\s+(?:&|and|[A-Z0-9][\w'’&.\-]*)){0,4})",
+    r"([A-Z][\w'’&.\-]*(?:\s+(?:&|and|of|the|[A-Z0-9][\w'’&.\-]*)){0,4}),?\s+(?:is|are)\s+(?:preparing|set|setting up|getting ready|"
+    r"planning|expected|slated|gearing up|expanding|heading|coming|opening|launching|bringing|making plans)",
+    r"([A-Z][\w'’&.\-]*(?:\s+(?:&|and|[A-Z0-9][\w'’&.\-]*)){0,4})\s+will\s+(?:open|be opening|join|debut|soon open)",
+    rf"([A-Z][\w'’.\-]*(?:\s+[A-Z][\w'’.\-]*){{0,3}}\s+{COFFEE_WORD}(?:\s+(?:&\s+[A-Z][\w'’]*|and\s+[A-Z][\w'’]*|Co\.?(?!\w)|Company|House|Bar|Lab|Shop|Kitchen|Collective))*)",
+    rf"([A-Z][\w'’.\-]*\s+{COFFEE_WORD})",
+]
+
+
+MONTH_YEAR = re.compile(rf"\b((?:early |late |mid-?)?{MONTHS}\s+20\d\d)\b(?!\s*[,]?\s*\d)", re.I)
+PERSON = r"([A-Z][a-z]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-z'’\-]+){1,2})"
+OWNER_PATTERNS = [
+    (rf"(?:founded|owned|run|started|launched|opened)\s+by\s+(?:[\w\-]+\s+){{0,4}}?{PERSON}", "founder"),
+    (rf"\b(?:[Cc]o-)?(?:[Ff]ounder|[Oo]wner|[Pp]roprietor)s?(?:\s+and\s+[\w\- ]{{0,30}}?)?,?\s+{PERSON}", "owner"),
+    (rf"{PERSON},\s+(?:the\s+)?(?:co-)?(?:owner|founder)\b", "owner"),
+    (r"\b(?:[Oo]wners|[Ff]ounders|couple)\s+([A-Z][a-z]+)\s+and\s+[A-Z][a-z]+\s+([A-Z][a-z'’\-]+)", "owner"),
+]
+
+
+def article_owners(text):
+    """Owner / founder named in a news snippet: 'founded by ... Emma Layman', 'owners Bryan and Reghan Haven'."""
+    out = []
+    for pat, role in OWNER_PATTERNS:
+        for m in re.finditer(pat, text):
+            name = " ".join(m.groups()) if len(m.groups()) > 1 else m.group(1)
+            name = re.sub(r"\s+(?:told|says|said|is|was|has|got|and|who|of)$", "", name.strip())
+            if E.is_person(name) and not re.search(COFFEE_WORD, name, re.I) and not re.search(r"\b(?:What Now|Instagram|Facebook)\b", name):
+                out.append((name, role))
+    return out
+
+
+def clean_name(n):
+    n = re.sub(r"\s+", " ", (n or "").strip(" ,.:;'\"“”‘’-–"))
+    n = LEAD_JUNK.sub("", n).strip()
+    n = re.sub(r"^(?:coffee shop|cafe|café|coffee brand|coffee company|specialty coffee shop)\s+(?=[A-Z])", "", n)
+    return n
+
+
+def good_name(n):
+    if not n or len(n) < 3 or len(n) > 60 or JUNK_NAME.match(n) or GENERIC.match(n):
+        return False
+    if not E.distinctive(n) or (E.is_person(n) and not re.search(COFFEE_WORD, n, re.I)):
+        return False
+    return not re.match(r"^(?:owner|founder|co-owner|according|the company|the brand|the shop|the cafe|the café|"
+                        r"this|it|they|we|what now|axios|eater|instagram|facebook|tiktok)\b", n, re.I)
+
+
+def name_from(kind, title, url, desc=""):
+    """Pull the business name out of a search result."""
     t = title.strip()
     if kind == "instagram":
         m = re.match(r"^(.+?)\s+\(@[\w.]+\)", t) or re.match(r"^(.+?)\s+on Instagram\b", t)
@@ -110,10 +179,29 @@ def name_from(kind, title, url):
         return m.group(1).replace("_", " ").replace(".", " ").title() if m and m.group(1) not in E.IG_RESERVED else ""
     if kind == "facebook":
         return re.split(r"\s+[|\-–]\s+", t)[0].strip()
-    m = re.match(r"^(?:(?:new|local|beloved|popular|family-owned)\s+)?([A-Z0-9][\w'&.’ ]{2,60}?)\s+"
-                 r"(?:to open|opening|is opening|will open|set to open|coming|plans|brings|debuts|lands|opens|"
-                 r"readies|signs|eyes|heads|expands|takes over)\b", t, re.I)
-    return m.group(1).strip() if m else ""
+    if kind == "tiktok":
+        m = re.match(r"^(.+?)\s+\(@[\w.]+\)", t)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"tiktok\.com/@([A-Za-z0-9_.]+)", url)
+        return m.group(1).replace("_", " ").replace(".", " ").title() if m else ""
+    # News: try the headline, then the article snippet; a name found in both wins.
+    cands = []
+    m = re.match(rf"^(?:(?:new|local|beloved|popular|family-owned)\s+)?([A-Z0-9][\w'&.’ \-]{{2,60}}?)\s+(?:{HEAD_VERB})\b", t, re.I)
+    if m:
+        cands.append(clean_name(m.group(1)))
+    for pat in SENT_PATTERNS:
+        for mm in re.finditer(pat, desc):
+            cands.append(clean_name(mm.group(1)))
+    cands = [c for c in cands if good_name(c)]
+    if not cands:
+        return ""
+    tl = t.lower()
+    dl = desc.lower()
+    # prefer: named in both headline and snippet, then has a coffee word, then shorter (less junk)
+    cands.sort(key=lambda c: (not (c.lower() in tl and c.lower() in dl), c.lower() not in tl,
+                              not re.search(COFFEE_WORD, c, re.I), len(c)))
+    return cands[0]
 
 
 def handle_from(url, kind):
@@ -130,28 +218,31 @@ def parse(kind, res, city, state):
     text = f"{res['title']} {res['desc']}"
     if not COMING.search(text) or LISTICLE.search(res["title"]):
         return None
-    name = re.sub(r"\s+", " ", name_from(kind, res["title"], res["url"]))[:80]
+    name = re.sub(r"\s+", " ", name_from(kind, res["title"], res["url"], res["desc"]))[:80]
     if not name or JUNK_NAME.match(name) or len(name) < 3:
         return None
     level, chain = L.classify(name, "")
     if chain or any(p.search(name) for p in L._nonshop):
         return None
-    if not level and not (COFFEE.search(res["desc"]) and kind in ("instagram", "facebook")):
-        return None  # news needs a coffee word in the name; a social page can say it in its bio
+    if not level and not COFFEE.search(f"{res['title']} {res['desc']}"):
+        return None  # the name, headline or snippet has to be about coffee / tea / boba / matcha
     if kind == "news":
         place = f"{res['title']} {res['desc']} {res['url']}".lower()
         if city.lower() not in place and city.lower().replace(" ", "") not in place:
             return None
     addr = (ADDRESS.search(res["desc"]) or ADDRESS.search(res["title"]))
-    hint = OPEN_HINT.search(text)
-    owners = E.extract_owners(text, name, city)
+    hint = OPEN_HINT.search(text) or MONTH_YEAR.search(text)
+    owners = E.extract_owners(text, name, city) or article_owners(text)
     date = (res["age"] or "")[:10] or dt.date.today().isoformat()
     raw = {"title": res["title"][:300], "snippet": res["desc"][:600], "url": res["url"], "kind": kind,
            "opening_hint": hint.group(1).strip(" .,;") if hint else "",
            "owner": owners[0][0] if owners else "", "owner_role": owners[0][1] if owners else ""}
     if kind in ("instagram", "facebook"):
         raw[kind] = handle_from(res["url"], kind)
-    label = {"instagram": "Instagram", "facebook": "Facebook", "news": "News"}[kind]
+    if kind == "tiktok":
+        m = re.search(r"tiktok\.com/@([A-Za-z0-9_.]+)", res["url"])
+        raw["tiktok"] = m.group(1) if m else ""
+    label = {"instagram": "Instagram", "facebook": "Facebook", "news": "News", "tiktok": "TikTok"}[kind]
     rec = {
         "source_id": f"web_{kind}", "jurisdiction": f"{city}, {state}", "signal": "coming_soon",
         "record_id": hashlib.sha1(f"{kind}|{L.norm_name(name)}|{city.lower()}".encode()).hexdigest()[:16],
@@ -183,8 +274,8 @@ def main():
         print(f"discover: last run {last[:10]}, next in {cfg['every_days']} days (use --force to run now)")
         return
     cities = cfg["cities"]
-    # 12 cities a week (36 searches), rotating, so every city is covered every few weeks
-    n = max(1, min(int(cfg["cities_per_week"]), B.DISCOVERY_PER_WEEK // 3))
+    # 36 searches a week in total, rotating through the cities (4 searches per city = 9 cities a week)
+    n = max(1, B.DISCOVERY_PER_WEEK // max(1, len([k for k in cfg["searches"] if k in SEARCHES])))
     groups = math.ceil(len(cities) / n)
     week = dt.date.today().isocalendar()[1]
     if not a.cities:
@@ -192,12 +283,10 @@ def main():
     if a.cities:
         want = {c.strip().lower() for c in a.cities.split(",")}
         cities = [c for c in cities if c[0].lower() in want]
-    found, seen, searches = [], set(), 0
+    found, seen, searches, tally, results_seen = [], set(), 0, {}, {}
     for city, state in cities:
-        queries = [("instagram", f'site:instagram.com "coming soon" coffee {city}', "py"),
-                   ("facebook", f'site:facebook.com "coming soon" coffee shop {city}', "py"),
-                   ("news", f'new coffee shop "coming soon" OR "set to open" OR "opening soon" {city}', "pm")]
-        for kind, q, fresh in queries:
+        queries = [(k, SEARCHES[k][0], SEARCHES[k][1].format(city=city), SEARCHES[k][2]) for k in cfg["searches"] if k in SEARCHES]
+        for skey, kind, q, fresh in queries:
             if not B.spend(con, "coming_soon"):
                 print("  stopped: this month's Brave search allowance is used up")
                 break
@@ -218,8 +307,12 @@ def main():
                 if rec and rec["record_id"] not in seen:
                     seen.add(rec["record_id"])
                     found.append(rec)
+                    tally[skey] = tally.get(skey, 0) + 1
+                results_seen[skey] = results_seen.get(skey, 0) + 1
     print("  " + B.report(con))
     print(f"discover: {searches} searches, {len(found)} coming-soon shops found")
+    for k in results_seen:
+        print(f"  {k}: {results_seen[k]} results read, {tally.get(k, 0)} kept")
     for r in found[:200]:
         print(f"  {r['jurisdiction']:<22} {r['name'][:40]:<40} {r['event_type'][:50]}")
     if a.dry_run:

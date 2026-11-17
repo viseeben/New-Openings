@@ -421,7 +421,7 @@ def step_owners(store, sources):
         print(f"  owners: chicago lookup failed: {str(e)[:200]}")
 
     # Coming-soon posts and news (discover.py): owner named in the article, Instagram, Facebook
-    for src_id in ("web_instagram", "web_facebook", "web_news"):
+    for src_id in ("web_instagram", "web_facebook", "web_news", "web_tiktok"):
         for k, r in recs_of(src_id):
             raw = r["raw"]
             if raw.get("owner") and is_person(raw["owner"]):
@@ -431,6 +431,8 @@ def step_owners(store, sources):
                 store.add(k, "instagram", raw["instagram"], "coming_soon_post", 75, "high")
             if raw.get("facebook"):
                 store.add(k, "facebook", "https://www.facebook.com/" + raw["facebook"], "coming_soon_post", 60)
+            if raw.get("tiktok"):
+                store.add(k, "tiktok", raw["tiktok"], "coming_soon_post", 60)
 
     # Chicago building permits: named contacts. Mostly property owners, contractors and
     # architects, so they rank below anything the shop's own filings or website say.
