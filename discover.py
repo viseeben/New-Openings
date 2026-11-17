@@ -28,6 +28,7 @@ about 450 a month for the default 36 cities.
 import argparse
 import datetime as dt
 import hashlib
+import math
 import json
 import os
 import re
@@ -40,6 +41,7 @@ import urllib.request
 
 import leads as L
 import enrich as E
+import budget as B
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG = os.path.join(HERE, "discovery.json")
@@ -79,7 +81,8 @@ def load_config():
     except Exception:
         cfg = {}
     cfg.setdefault("cities", DEFAULT_CITIES)
-    cfg.setdefault("every_days", 6)
+    cfg.setdefault("every_days", 7)
+    cfg.setdefault("cities_per_week", 12)
     return cfg
 
 
@@ -180,6 +183,12 @@ def main():
         print(f"discover: last run {last[:10]}, next in {cfg['every_days']} days (use --force to run now)")
         return
     cities = cfg["cities"]
+    # 12 cities a week (36 searches), rotating, so every city is covered every few weeks
+    n = max(1, min(int(cfg["cities_per_week"]), B.DISCOVERY_PER_WEEK // 3))
+    groups = math.ceil(len(cities) / n)
+    week = dt.date.today().isocalendar()[1]
+    if not a.cities:
+        cities = cities[(week % groups) * n:(week % groups) * n + n]
     if a.cities:
         want = {c.strip().lower() for c in a.cities.split(",")}
         cities = [c for c in cities if c[0].lower() in want]
@@ -189,6 +198,9 @@ def main():
                    ("facebook", f'site:facebook.com "coming soon" coffee shop {city}', "py"),
                    ("news", f'new coffee shop "coming soon" OR "set to open" OR "opening soon" {city}', "pm")]
         for kind, q, fresh in queries:
+            if not B.spend(con, "coming_soon"):
+                print("  stopped: this month's Brave search allowance is used up")
+                break
             try:
                 results = brave(q, key, fresh)
                 searches += 1
@@ -206,6 +218,7 @@ def main():
                 if rec and rec["record_id"] not in seen:
                     seen.add(rec["record_id"])
                     found.append(rec)
+    print("  " + B.report(con))
     print(f"discover: {searches} searches, {len(found)} coming-soon shops found")
     for r in found[:200]:
         print(f"  {r['jurisdiction']:<22} {r['name'][:40]:<40} {r['event_type'][:50]}")

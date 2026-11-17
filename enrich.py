@@ -48,6 +48,7 @@ import urllib.parse
 import urllib.request
 
 import leads as L
+import budget as B
 
 import functools
 print = functools.partial(print, flush=True)  # live logs in GitHub Actions
@@ -660,7 +661,19 @@ DIRECTORY = re.compile(
     r"order\.online|clover\.com|tryotter|slice|menu\.|bringmethat|dripos", re.I)
 
 
-def brave(q, key):
+class OutOfSearches(Exception):
+    pass
+
+
+BUDGET = {"con": None, "left_today": 0}
+
+
+def brave(q, key, step="search"):
+    """Every Brave search goes through here and is counted against the monthly cap (budget.py)."""
+    con = BUDGET["con"]
+    if con is None or BUDGET["left_today"] <= 0 or not B.spend(con, step):
+        raise OutOfSearches()
+    BUDGET["left_today"] -= 1
     url = "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode(
         {"q": q, "count": 10, "country": "us", "safesearch": "moderate"})
     req = urllib.request.Request(url, headers={"Accept": "application/json", "X-Subscription-Token": key,
@@ -745,6 +758,9 @@ def step_search(store, limit):
         k = l["lead_key"]
         name = clean_query_name(l["name"])
         place = " ".join(filter(None, [l.get("city"), l.get("state")]))
+        if BUDGET["left_today"] < 2:
+            print("  search: today's search allowance used up")
+            break
         try:
             # Instagram-only search first: its result titles carry the profile's city.
             igres = brave(f'site:instagram.com {name} {place}', key)
@@ -753,6 +769,9 @@ def step_search(store, limit):
             results = brave(f'"{name}" {place} coffee', key)
             time.sleep(1.1)
             igs += [(u, t) for u, t, _ in results if "instagram.com/" in u]
+        except OutOfSearches:
+            print("  stopped: this month's / today's Brave search allowance is used up")
+            break
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 print("  search: rate limited, stopping for today")
@@ -1052,8 +1071,11 @@ def step_people(store, limit):
         name = clean_query_name(l["name"])
         place = " ".join(filter(None, [l.get("city"), l.get("state")]))
         try:
-            results = brave(f'"{name}" {place} owner OR founder', key)
+            results = brave(f'"{name}" {place} owner OR founder', key, "owner")
             time.sleep(1.1)
+        except OutOfSearches:
+            print("  stopped: this month's / today's Brave search allowance is used up")
+            break
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 print("  people: rate limited, stopping for today")
@@ -1366,13 +1388,22 @@ def main():
         store.resolve(); store.save()
     if "manual" in steps:
         step_manual(store)  # before search, so hand-checked leads aren't searched
+    BUDGET["con"] = con
+    today_total = B.daily_allowance(con) if os.environ.get("BRAVE_API_KEY", "").strip() else 0
+    owner_share = min(a.owner_search_limit, math.ceil(today_total * 0.6))
+    if os.environ.get("BRAVE_API_KEY", "").strip():
+        print(f"  {B.report(con)}; today: up to {today_total} ({owner_share} reserved for owner searches)")
     if "search" in steps:
         store.resolve()
+        BUDGET["left_today"] = min(today_total - owner_share, a.search_limit * 2)
         step_search(store, a.search_limit)
+        today_total -= (min(today_total - owner_share, a.search_limit * 2) - BUDGET["left_today"])
     if "web" in steps:
         step_web(store, a.web_limit)
     if "people" in steps:
+        BUDGET["left_today"] = min(today_total, a.owner_search_limit)
         step_people(store, a.owner_search_limit)
+    BUDGET["left_today"] = 0
     if "history" in steps:
         step_history(store, a.history_limit)
     if "places" in steps:

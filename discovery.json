@@ -1,6 +1,6 @@
 {
- "_help": "Cities discover.py searches each week for coffee shops announcing 'coming soon' on Instagram, Facebook and local news. Each city costs 3 Brave searches a week (about 13 a month). Add or remove [city, state] pairs.",
- "every_days": 6,
+ "_help": "Cities discover.py searches for coffee shops announcing 'coming soon' on Instagram, Facebook and local news. It searches 12 of these cities each week (3 Brave searches per city, 36 a week), rotating so every city comes up every 3 weeks. Adding cities makes the rotation longer; it does not add searches.",
+ "every_days": 7,
  "cities": [
   [
    "New York",
@@ -146,5 +146,6 @@
    "Boise",
    "ID"
   ]
- ]
+ ],
+ "cities_per_week": 12
 }
