@@ -104,7 +104,46 @@ CHAINS = [
     "kung fu tea", "gong cha", "sharetea", "the human bean", "pj's coffee",
     "aroma joe", "crimson cup", "foxtail coffee", "summermoon", "ziggis",
     "bigby", "costa coffee", "joe & the juice", "joe and the juice",
+    # Added Nov 2026 after reviewing real leads: chains / franchises / multi-unit brands
+    "cotti coffee", "luckin", "blank street", "colectivo", "mojo coffee", "coco fresh", "coco bubble tea",
+    "qamaria", "qahwah house", "haraz coffee", "27 club coffee", "black rock coffee", "hteao", "htea opco",
+    "black sheep coffee", "bluestone lane", "gregorys coffee", "gregory's coffee", "matto espresso",
+    "intelligentsia", "stumptown", "la colombe", "caffe nero", "pret a manger", "le pain quotidien",
+    "paris baguette", "tous les jours", "85c bakery", "tiger sugar", "chatime", "ten ren", "boba guys",
+    "yi fang", "vivi bubble tea", "teapulse", "tea villa", "molly tea", "chagee", "heytea", "mixue",
+    "kung fu", "presotea", "happy lemon", "it's boba time", "ding tea", "sweetgreen", "panera",
+    "keke's breakfast", "kekes breakfast", "toasted yolk", "another broken egg", "flying biscuit",
+    "first watch", "snooze", "cheddar's", "mimi's cafe", "einstein bros", "bruegger", "dunkin",
+    "tim hortons", "krispy", "crumbl", "nothing bundt", "cinnabon", "auntie anne", "smoothie king",
+    "tropical smoothie", "jamba", "playa bowls", "frontier rodeo", "white buffalo coffee",
+    "aroma joe", "biggby", "ziggi", "scooters", "dutch bros", "7 brew", "seven brew", "human bean",
+    "summer moon", "summermoon", "philz", "peet", "caribou", "coffee beanery", "port city java",
+    "black rifle", "pj's", "cc's coffee", "joe coffee company", "think coffee",
+    "birch coffee", "variety coffee", "partners coffee", "devocion", "maman", "ralph's coffee",
+    "gloria jean", "dunn bros", "tea-rek'z",
 ]
+# Places that serve coffee but are not independent coffee shops: never leads.
+NON_SHOP = [
+    r"\bhotel\b", r"\bresort\b", r"\bcasino\b", r"\bairport\b", r"\bterminal\b", r"\bconcourse\b",
+    r"food court", r"\bconcession", r"\bstadium\b", r"\barena\b", r"\bhospital\b", r"medical center",
+    r"\buniversity\b", r"\bcollege\b", r"\bcampus\b", r"dining hall", r"\bdeli\b", r"\bbodega\b",
+    r"grocery", r"supermarket", r"\bconvenience\b", r"mini ?mart", r"\bpharmacy\b", r"gas station",
+    r"\bpub\b", r"biergarten", r"\btavern\b", r"bar & grill", r"bar and grill", r"\bcatering\b",
+    # contract food service and corporate / office cafeterias
+    r"\beurest\b", r"compass group", r"\baramark\b", r"\bsodexo\b", r"bon appetit management",
+    r"restaurant associates", r"\bflik\b", r"\bcanteen\b", r"guckenheimer", r"\bcorporate\b",
+    r"\baccenture\b", r"\bdeloitte\b", r"\bjpmorgan\b", r"goldman sachs", r"morgan stanley",
+    r"\bgoogle\b", r"\bamazon\b", r"\bmicrosoft\b", r"\bbloomberg\b", r"\bpwc\b", r"\bkpmg\b",
+]
+# Your own additions, without touching code: filters.json
+#   {"chains": ["some brand"], "not_shops": ["regex"], "exclude_names": ["exact shop name"]}
+try:
+    _F = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "filters.json")))
+except Exception:
+    _F = {}
+CHAINS = list(dict.fromkeys(c.lower() for c in CHAINS + _F.get("chains", [])))
+NON_SHOP = NON_SHOP + _F.get("not_shops", [])
+EXCLUDE_NAMES = {n.strip().lower() for n in _F.get("exclude_names", [])}
 
 def _c(ps):
     return [re.compile(p, re.I) for p in ps]
@@ -113,6 +152,7 @@ def _c(ps):
 _strong, _cafe, _weak, _neg = _c(STRONG), _c(CAFE), _c(WEAK), _c(NEGATIVE)
 _negcat, _coffeecat, _foodcat = _c(NEGATIVE_CATEGORY), _c(COFFEE_CATEGORY), _c(FOOD_CATEGORY)
 _naicscat = _c(NAICS_CATEGORY)
+_nonshop = _c(NON_SHOP)
 _kw, _kwneg, _nonfood = _c(KEYWORD), _c(KEYWORD_NEGATIVE), _c(NONFOOD_CATEGORY)
 
 
@@ -130,6 +170,8 @@ def classify(name, category_text=""):
     cat = (category_text or "").strip()
     low = text.lower()
     if any(p.search(text) for p in _neg) or any(p.search(cat) for p in _negcat):
+        return None, None
+    if any(p.search(text) for p in _nonshop) or low in EXCLUDE_NAMES:
         return None, None
     chain = next((c for c in CHAINS if c in low), None)
     if chain or any(p.search(text) for p in _strong):
@@ -382,6 +424,14 @@ def normalize(src, row):
     if not name and alt:
         name, alt = alt, ""
     category = get(row, f.get("category"))
+    if src.get("classify_field"):  # e.g. a building permit: no shop name, the description says coffee
+        desc = get(row, src["classify_field"])
+        lvl, _ = classify(desc, "")
+        if lvl not in ("strong", "cafe") or any(p.search(desc) for p in _nonshop):
+            return None
+        name, alt = src.get("name_template", "Coffee shop"), ""
+    if any(p.search(n) for n in (name, alt) for p in _nonshop if n):
+        return None  # hotel, airport, cafeteria... under either of its names
     level, chain = classify(name, category)
     if not level and alt:
         level, chain = classify(alt, category)
@@ -540,7 +590,120 @@ def score(lead, today):
     return max(0, min(100, s))
 
 
-LEAD_ADDED_COLS = ["open_est_start", "open_est_end", "open_status", "open_conf", "open_basis"]
+LEAD_ADDED_COLS = ["open_est_start", "open_est_end", "open_status", "open_conf", "open_basis",
+                   "brand_sites", "lead_type"]
+
+# Words that don't identify a business on their own ("Luna Cafe" vs "Cafe Luna" are the same
+# brand key; "Daily Coffee" in 4 cities is probably 4 different shops).
+BRAND_STOP = {"coffee", "cafe", "caffe", "co", "company", "the", "and", "espresso", "bar", "house",
+              "shop", "roasters", "roastery", "roasting", "tea", "bubble", "boba", "llc", "inc", "corp",
+              "of", "a", "kitchen", "bakery", "drive", "thru", "through", "express", "lounge"}
+GENERIC_BRAND = {"daily", "sunrise", "luna", "garden", "corner", "central", "main", "city", "family",
+                 "little", "sweet", "golden", "royal", "star", "pioneer", "cool beans", "good", "local",
+                 "union", "market", "village", "downtown", "uptown", "the daily grind", "daily grind",
+                 "common grounds", "grounds", "perk", "perk up", "brew", "cup", "bean", "beans"}
+
+
+def brand_key(name):
+    """'Starbucks Coffee #1234 (Main St)' -> 'starbucks'. Empty if nothing distinctive is left."""
+    n = re.sub(r"\(.*?\)|#\s*\d+|\b\d+\b", " ", (name or "").lower())
+    n = re.sub(r"[^a-z0-9 ]", " ", n.replace("'", ""))
+    toks = [t for t in n.split() if t not in BRAND_STOP]
+    key = " ".join(toks)
+    return "" if (not key or key in GENERIC_BRAND or len(key) < 4) else key
+
+
+TEMPLATE_SOURCES = {s["id"] for s in json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                                   "sources.json")))["sources"] if s.get("name_template")}
+
+
+def addr_key(addr):
+    a = norm_addr(addr)
+    m = re.match(r"(\d+[a-z]?)\s+(.*)", a)
+    if not m:
+        return ""
+    street = next((t for t in m.group(2).split() if t not in ("n", "s", "e", "w")), "")
+    return f"{m.group(1)} {street}"
+
+
+def refilter(con):
+    """Apply today's filters (chain list, not-a-shop rules, filters.json) to records already
+    stored, so a change to the lists takes effect without waiting for the records to be fetched again."""
+    dropped = tagged = 0
+    for sid, rid, name, alt, cat, chain in con.execute(
+            "SELECT source_id, record_id, name, alt_name, category, chain FROM records").fetchall():
+        if sid in TEMPLATE_SOURCES:
+            continue
+        if any(p.search(n) for n in (name, alt) for p in _nonshop if n):
+            lvl, ch = None, None
+        else:
+            lvl, ch = classify(name, cat)
+            if not lvl and alt:
+                lvl, ch = classify(alt, cat)
+        if not lvl:
+            con.execute("DELETE FROM records WHERE source_id=? AND record_id=?", (sid, rid))
+            dropped += 1
+        elif (ch or "") != (chain or ""):
+            con.execute("UPDATE records SET chain=? WHERE source_id=? AND record_id=?", (ch or "", sid, rid))
+            tagged += 1
+    if dropped or tagged:
+        print(f"filters: removed {dropped} records that are no longer leads, re-tagged {tagged} chains")
+
+
+def merge_zipless(con, groups):
+    """Records with no ZIP (building permits) are keyed by city; fold them into the lead at the
+    same street address in the same city that has a ZIP."""
+    by_addr = {}
+    for k, recs in groups.items():
+        if any(r["zip"] for r in recs):
+            for r in recs:
+                by_addr.setdefault(((r["city"] or "").lower(), addr_key(r["address"])), set()).add(k)
+    moved = 0
+    for k in list(groups):
+        recs = groups[k]
+        if any(r["zip"] for r in recs):
+            continue
+        t = by_addr.get(((recs[0]["city"] or "").lower(), addr_key(recs[0]["address"])), set())
+        if len(t) == 1:
+            t = next(iter(t))
+            groups[t].extend(recs)
+            del groups[k]
+            for r in recs:
+                con.execute("UPDATE records SET lead_key=? WHERE source_id=? AND record_id=?",
+                            (t, r["source_id"], r["record_id"]))
+            moved += 1
+    return moved
+
+
+def merge_registrations(con, groups):
+    """A state LLC / trade-name filing is usually filed from the owner's home or an agent's office,
+    so it lands at a different address than the shop and becomes a separate lead with no
+    storefront. When exactly one storefront lead in the same state has the same business name,
+    fold the filing into it: the shop gets the filing's owner names, and the duplicate goes away."""
+    by_brand = {}
+    for k, recs in groups.items():
+        if any(r["signal"] != "business_registration" for r in recs):
+            for b in {brand_key(r["name"]) for r in recs} | {brand_key(r["alt_name"]) for r in recs}:
+                if b:
+                    by_brand.setdefault((recs[0]["state"], b), set()).add(k)
+    moved = 0
+    for k in list(groups):
+        recs = groups[k]
+        if any(r["signal"] != "business_registration" for r in recs):
+            continue
+        targets = set()
+        for r in recs:
+            targets |= by_brand.get((r["state"], brand_key(r["name"])), set())
+        if len(targets) == 1:
+            t = targets.pop()
+            groups[t].extend(recs)
+            del groups[k]
+            for r in recs:
+                con.execute("UPDATE records SET lead_key=? WHERE source_id=? AND record_id=?",
+                            (t, r["source_id"], r["record_id"]))
+                r["lead_key"] = t
+            moved += 1
+    return moved
 
 
 def migrate(con):
@@ -555,19 +718,30 @@ def rebuild_leads(con):
     today = dt.date.today()
     migrate(con)
     src_by_id = {s["id"]: s for s in load_sources()}
+    refilter(con)
     rows = con.execute("SELECT * FROM records ORDER BY event_date").fetchall()
     cols = [d[0] for d in con.execute("SELECT * FROM records LIMIT 0").description]
     groups = {}
     for r in rows:
         r = dict(zip(cols, r))
         groups.setdefault(r["lead_key"], []).append(r)
+    merge_zipless(con, groups)
+    merged = merge_registrations(con, groups)
+    # How many different storefronts carry the same brand name (all states, last 12 months)
+    sites = {}
+    for k, recs in groups.items():
+        if any(r["signal"] != "business_registration" for r in recs):
+            b = brand_key(max(recs, key=lambda r: len(r["name"] or ""))["name"])
+            if b:
+                sites.setdefault(b, set()).add(k)
     existing = {k: (st, nt, fs) for k, st, nt, fs in
                 con.execute("SELECT lead_key, status, notes, first_seen FROM leads")}
     con.execute("DELETE FROM leads")
     rank = {"strong": 6, "category": 5, "cafe": 4, "keyword": 3, "naics": 2, "weak": 1}
     for k, recs in groups.items():
         dates = sorted(r["event_date"] for r in recs if r["event_date"])
-        best = max(recs, key=lambda r: (rank.get(r["match_level"], 0), len(r["address"] or "")))
+        best = max(recs, key=lambda r: (r["source_id"] not in TEMPLATE_SOURCES,
+                                        rank.get(r["match_level"], 0), len(r["address"] or "")))
         names = sorted({r["name"] for r in recs} | {r["alt_name"] for r in recs if r["alt_name"]})
         lead = {
             "lead_key": k, "name": best["name"],
@@ -586,6 +760,12 @@ def rebuild_leads(con):
             "match_level": best["match_level"],
             "chain": next((r["chain"] for r in recs if r["chain"]), ""),
         }
+        n_sites = len(sites.get(brand_key(lead["name"]), ()))
+        lead["brand_sites"] = n_sites if n_sites > 1 else None
+        if not lead["chain"] and n_sites >= 4:
+            lead["chain"] = f"multi-location brand ({n_sites} sites)"
+        lead["lead_type"] = ("Chain / franchise" if lead["chain"] else
+                             "New location of existing brand" if n_sites >= 2 else "New business")
         lead["score"] = score(lead, today)
         lead.update(opening_window(recs, src_by_id, today))
         st, nt, fs = existing.get(k, ("new", "", None))
@@ -594,6 +774,8 @@ def rebuild_leads(con):
         con.execute(f"INSERT INTO leads ({','.join(lead)}) VALUES ({','.join('?'*len(lead))})",
                     list(lead.values()))
     con.commit()
+    if merged:
+        print(f"merged {merged} state filings into the storefront with the same business name")
 
 
 def export_csv(con, path=CSV_FILE):

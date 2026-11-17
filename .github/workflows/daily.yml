@@ -24,7 +24,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -55,15 +55,22 @@ jobs:
       # Owner names, Instagram, websites, emails. Never fails the job: the page still builds.
       - name: Find owners, Instagram and websites
         continue-on-error: true
-        timeout-minutes: 25
+        timeout-minutes: 35
         env:
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
           BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
           # Daily Brave search budget (only used if BRAVE_API_KEY is set). Instagram search
-          # uses 2 searches per lead, owner search 1. 12 + 8 leads = ~32 searches a day,
-          # ~970 a month, which fits in Brave's $5/month free credit (~1,000 searches).
-          SEARCH_LIMIT: "12"
-          OWNER_SEARCH_LIMIT: "8"
+          # uses 2 searches per lead, owner search 1: 15*2 + 20 = ~50 searches a day, ~1,500 a
+          # month. Brave gives $5 of credit a month (~1,000 searches), so this costs about
+          # $2-3 a month beyond the credit. Lower these to stay free (12 and 8 fit the credit).
+          SEARCH_LIMIT: "15"
+          OWNER_SEARCH_LIMIT: "20"
+          # Optional Google business listings (open/closed, review count, phone, website).
+          # Text Search with those fields: 1,000 free a month, then $35 per 1,000.
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          PLACES_LIMIT: "30"
+          # Earlier inspections at the same address (NYC, Chicago open data; free)
+          HISTORY_LIMIT: "250"
         run: python3 enrich.py
 
       - name: Build page

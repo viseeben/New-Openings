@@ -88,6 +88,29 @@ earlier but needs a quick check (Google/Instagram) to find the actual location.
    signals + recency, minus 45 for corporate chains (they buy POS centrally,
    so independents float to the top; chains stay in the table, flagged in `chain`).
 
+## Prospect quality (Nov 2026)
+
+- **Chains and non-shops.** `CHAINS` in `leads.py` covers national, regional and NYC/Chicago
+  multi-unit brands (and breakfast chains with "cafe" in the name). `NON_SHOP` drops hotels,
+  airports and terminals, food courts, campuses, hospitals, delis, bodegas, pubs, contract
+  food service and corporate cafeterias. Any brand name seen at 4+ new storefronts in the
+  last 12 months is flagged as a multi-location brand automatically; 2 to 3 is labeled
+  "New location of existing brand". Add your own brands, patterns or exact names in
+  `filters.json`; every run re-applies the lists to stored records.
+- **Filings merged into storefronts.** A state LLC / trade-name filing whose business name
+  matches exactly one storefront lead in the same state is folded into that lead, so the
+  shop gets the filer's name (and the duplicate lead disappears).
+- **Really new?** `enrich.py` checks whether a shop was already trading: earlier health
+  inspections at the address (NYC, Chicago; same name = existing shop, other name =
+  "replacing X"), review counts in web results, a Google business listing (optional
+  `GOOGLE_PLACES_API_KEY`) and OpenStreetMap. Proven already-open shops show as
+  "Already open", lose 35 points and are hidden by the page's default "New businesses +
+  new locations" filter.
+- **Chicago building permits** for coffee shop build-outs: an early signal (2 to 6 months
+  ahead) with no shop name, merged into the shop's license or inspection at the same address
+  when that arrives. Permit contacts are mostly landlords and contractors, so they rank low.
+- **Facebook pages** are picked from the search results the search steps already fetch.
+
 ## Estimated opening (`open_status`, `open_est_start`, `open_est_end`, `open_conf`)
 
 Each lead gets a label (**Upcoming**, **Opening now**, **Probably open**) and a date range,

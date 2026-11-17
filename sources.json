@@ -1095,6 +1095,61 @@
         "zip": "facility_postal_zipcode",
         "date": "first_date"
       }
+    },
+    {
+      "id": "chicago_building_permits",
+      "jurisdiction": "Chicago, IL",
+      "state": "IL",
+      "level": "city",
+      "type": "socrata",
+      "domain": "data.cityofchicago.org",
+      "dataset": "ydr8-5enu",
+      "portal_url": "https://data.cityofchicago.org/d/ydr8-5enu",
+      "signal": "building_permit",
+      "date_field": "issue_date",
+      "filter_fields": [
+        "work_description"
+      ],
+      "words": [
+        "COFFEE",
+        "CAFE",
+        "ESPRESSO",
+        "BOBA",
+        "BUBBLE TEA",
+        "MATCHA",
+        "ROASTER"
+      ],
+      "classify_field": "work_description",
+      "name_template": "Coffee shop build-out (building permit)",
+      "default_city": "Chicago",
+      "event_label": "Building permit for a coffee shop build-out (usually 2 to 6 months before opening)",
+      "fields": {
+        "id": "permit_",
+        "address": [
+          "street_number",
+          "street_direction",
+          "street_name",
+          "suffix"
+        ],
+        "category": "work_description",
+        "event_type": "permit_type",
+        "lat": "latitude",
+        "lon": "longitude",
+        "date": "issue_date",
+        "contacts": [
+          "contact_1_type",
+          "contact_1_name",
+          "contact_2_type",
+          "contact_2_name",
+          "contact_3_type",
+          "contact_3_name",
+          "contact_4_type",
+          "contact_4_name",
+          "contact_5_type",
+          "contact_5_name"
+        ]
+      },
+      "_note": "Early signal with no shop name: the lead is named from the template and merges with the shop's license or inspection at the same address when that arrives. Contacts include the property owner, contractors and architects, so names from here are ranked low."
     }
   ]
 }
