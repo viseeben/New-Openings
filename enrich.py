@@ -1039,7 +1039,7 @@ def remember_owner(store, k, name, role, url, source):
     row = store.row(k)
     row["web_owner"], row["web_owner_role"], row["web_owner_url"] = name, role, url
     row["web_owner_source"] = source
-    store.add(k, "owner", name, source, 58, role)
+    store.add(k, "owner", name, source, 50 if source == "phone_lookup" else 58, role)
 
 
 def step_saved_owners(store):
@@ -1048,6 +1048,37 @@ def step_saved_owners(store):
         if row.get("web_owner") and k in store.leads:
             store.add(k, "owner", row["web_owner"], row.get("web_owner_source") or "website", 58,
                       row.get("web_owner_role") or "owner")
+
+
+def phone_of(l, row):
+    return l.get("phone") or row.get("osm_phone") or ""
+
+
+PERSON_RE = re.compile(r"\b([A-Z][a-z]{1,15}(?:\s+[A-Z]\.)?\s+[A-Z][a-z'’\-]{1,20}(?:\s+[A-Z][a-z'’\-]{1,20})?)\b")
+
+
+def owner_from_phone(results, digits, shop):
+    """A person listed next to the phone number on a directory / caller-ID result.
+    Only results that actually show the number count, and only a name that is the sole person
+    named across those results (two different names = can't tell, take neither)."""
+    names, url = {}, ""
+    for u, title, desc in results:
+        text = f"{title} | {desc}"
+        if digits not in re.sub(r"\D", "", text):
+            continue
+        # overlapping matches, so "Coffee Shop Gabriel Oliveri" still yields "Gabriel Oliveri"
+        cands = {m.group(1) for m in re.finditer(r"(?=\b(" + PERSON_RE.pattern[3:-3] + r")\b)", text)}
+        for n in cands:
+            if is_person(n) and not set(distinctive(n)) & set(distinctive(shop)) and not re.search(
+                    r"(?i)coffee|cafe|caf\xe9|shop|street|avenue|center|brooklyn|new york|united states|"
+                    r"caller|phone|number|reverse|lookup|report|carrier|wireless|mobile|verizon|t-mobile", n):
+                names[n] = names.get(n, 0) + 1
+                url = url or u
+    names = {n: c for n, c in names.items() if not any(n != o and n in o for o in names)}
+    if len(names) == 1:
+        n = next(iter(names))
+        return n, "listed with this phone number (check)", url
+    return None
 
 
 def step_people(store, limit):
@@ -1067,7 +1098,7 @@ def step_people(store, limit):
         todo.append(l)
     todo.sort(key=lambda l: -int(l["score"] or 0))
     todo = todo[:limit]
-    found = 0
+    found = phone_lookups = found_by_phone = 0
     for l in todo:
         k = l["lead_key"]
         name = clean_query_name(l["name"])
@@ -1098,7 +1129,30 @@ def step_people(store, limit):
         if hit:
             remember_owner(store, k, hit[0], hit[1], hit[2], "owner_search")
             found += 1
-    print(f"  people: {len(todo)} leads searched, {found} owner names found")
+            continue
+        # No owner found by name: if the permit/license gave a phone number, look the number up.
+        # The number on a health permit is often the applicant's own cell, which directory and
+        # caller-ID pages list under the owner's name. Uses one more search from the daily allowance.
+        digits = re.sub(r"\D", "", phone_of(l, store.row(k)))[-10:]
+        # keep enough of today's allowance for the remaining name searches
+        if len(digits) == 10 and BUDGET["left_today"] > len(todo) - todo.index(l) - 1:
+            d1, d2 = f"{digits[:3]}-{digits[3:6]}-{digits[6:]}", f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+            try:
+                presults = brave(f'"{d1}" OR "{d2}"', key, "phone")
+                time.sleep(1.1)
+            except OutOfSearches:
+                break
+            except Exception as e:
+                print(f"  phone lookup: {name}: {str(e)[:120]}")
+                continue
+            phone_lookups += 1
+            hit = owner_from_results(presults, l["name"], l.get("city")) or owner_from_phone(presults, digits, l["name"])
+            if hit:
+                remember_owner(store, k, hit[0], hit[1], hit[2], "phone_lookup")
+                found += 1
+                found_by_phone += 1
+    print(f"  people: {len(todo)} leads searched, {found} owner names found "
+          f"({phone_lookups} phone lookups, {found_by_phone} owners found by phone)")
 
 
 # --------------------------------------------------------------------------
@@ -1392,7 +1446,8 @@ def main():
         step_manual(store)  # before search, so hand-checked leads aren't searched
     BUDGET["con"] = con
     today_total = B.daily_allowance(con) if os.environ.get("BRAVE_API_KEY", "").strip() else 0
-    owner_share = min(a.owner_search_limit, math.ceil(today_total * 0.6))
+    # owner searches (plus up to half as many phone lookups) get first claim on the day's searches
+    owner_share = min(math.ceil(a.owner_search_limit * 1.5), math.ceil(today_total * 0.6))
     if os.environ.get("BRAVE_API_KEY", "").strip():
         print(f"  {B.report(con)}; today: up to {today_total} ({owner_share} reserved for owner searches)")
     if "search" in steps:
@@ -1403,7 +1458,7 @@ def main():
     if "web" in steps:
         step_web(store, a.web_limit)
     if "people" in steps:
-        BUDGET["left_today"] = min(today_total, a.owner_search_limit)
+        BUDGET["left_today"] = min(today_total, math.ceil(a.owner_search_limit * 1.5))
         step_people(store, a.owner_search_limit)
     BUDGET["left_today"] = 0
     if "history" in steps:

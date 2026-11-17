@@ -265,5 +265,8 @@ Source keys:
   name known) is built in, and you can save your own. Saved views live in your browser. The page
   link updates as you filter, so a link reopens the same view.
 - **Download CSV** exports exactly the leads on screen, ready for Clay.
+- **Phone lookups**: when the owner search finds no name and the permit gave a phone number,
+  the tool searches the number and takes a person listed with it (only if exactly one person is
+  named next to that number). Shown as "listed with this phone number (check)".
 - **Brave search budget**: hard cap of 900 searches a month (`budget.py`), only on the scheduled
   6am run. Merging a PR or running the workflow by hand never uses searches.
