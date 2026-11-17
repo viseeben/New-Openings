@@ -110,7 +110,11 @@ footer table{font-size:12px}
   <select id="signal"><option value="">All signals</option></select>
   <select id="opening" title="Estimated opening, from the type of record and its date">
     <option value="">Any opening status</option><option>Upcoming</option><option>Opening now</option>
-    <option value="soon">Upcoming or opening now</option><option>Probably open</option></select>
+    <option value="soon">Upcoming or opening now</option><option>Probably open</option><option>Already open</option></select>
+  <select id="ltype" title="Is it a new business, a new location of a brand, or a shop that was already open?">
+    <option value="fresh" selected>New businesses + new locations</option><option value="new">New businesses only</option>
+    <option>New location of existing brand</option><option value="open">Already open / existing shops</option>
+    <option value="">Any type</option></select>
   <select id="status"><option value="">Any status</option></select>
   <select id="contact"><option value="">Any contact info</option><option value="owner">Has owner name</option>
     <option value="instagram">Has Instagram</option><option value="email">Has email</option>
@@ -134,7 +138,7 @@ const SIGNALS = {
   pre_opening_inspection:"Pre-opening inspection", new_food_permit:"New food permit",
   plan_review:"Plan review", building_permit:"Building permit",
   new_business_license:"New business license", business_registration:"State registration",
-  inspection:"First inspection"};
+  inspection:"First inspection", coming_soon:"Coming soon (Instagram / Facebook / news)"};
 const STATUSES = ["new","researching","contacted","demo booked","won","not a fit"];
 const COLUMNS = [
   {k:"score", t:"Score", num:true, cls:"c-score"},
@@ -176,7 +180,8 @@ function sinceCut(days){
 
 function apply(){
   const q = $("q").value.trim().toLowerCase();
-  const st = $("state").value, sig = $("signal").value, stat = $("status").value, op = $("opening").value;
+  const st = $("state").value, sig = $("signal").value, stat = $("status").value, op = $("opening").value, lt = $("ltype").value;
+  const isOld = l => ["Already open","Existing shop (new permit or owner)"].includes(l.lead_type);
   const ct = $("contact").value;
   const hide = $("hideChains").checked, min = +$("minScore").value||0;
   const days = +document.querySelector("#since .on").dataset.v;
@@ -185,6 +190,7 @@ function apply(){
     (!hide || !l.chain) && l.score>=min && (!st||l.state===st) &&
     (!sig||l.signals.includes(sig)) && (!stat||statusOf(l)===stat) &&
     (!op || (op==="soon" ? ["Upcoming","Opening now"].includes(l.open_status) : l.open_status===op)) &&
+    (!lt || (lt==="fresh" ? !isOld(l) : lt==="new" ? (l.lead_type||"New business")==="New business" : lt==="open" ? isOld(l) : l.lead_type===lt)) &&
     (!cut || l.first_seen.slice(0,10)>=cut) &&
     (!ct || (ct==="any" ? (l.owner||l.instagram||l.email||l.website) : l[ct])) &&
     (!q || l._hay.includes(q)));
@@ -218,7 +224,7 @@ function row(l){
   </tr>${open===l.lead_key?detail(l):""}`;
 }
 
-const OP_CLS = {"Upcoming":"op-up","Opening now":"op-now","Probably open":"op-open"};
+const OP_CLS = {"Upcoming":"op-up","Opening now":"op-now","Probably open":"op-open","Already open":"op-open"};
 const fmtD = iso => iso ? new Date(iso+"T12:00:00").toLocaleDateString([], {month:"short", day:"numeric"}) : "";
 const yr = iso => iso ? iso.slice(0,4) : "";
 function opRange(l){
@@ -228,17 +234,20 @@ function opRange(l){
   return `${fmtD(l.open_est_start)}${y} – ${fmtD(l.open_est_end)}, ${yr(l.open_est_end)}`;
 }
 // Sort key for "soonest opening": opening now, then upcoming (soonest first), then probably open (most recent first).
-const OP_RANK = {"Opening now":0,"Upcoming":1,"Probably open":2};
+const OP_RANK = {"Opening now":0,"Upcoming":1,"Probably open":2,"Already open":3};
 function opKey(l){
   const r = OP_RANK[l.open_status]; if(r===undefined) return "";
   if(r<2) return `${r}${l.open_est_start}`;
+  if(r===3) return "3";
   const days = Math.max(0, Math.round((Date.now()-new Date(l.open_est_end+"T12:00:00"))/864e5));
   return `2${String(days).padStart(6,"0")}`;
 }
 function openingCell(l){
   if(!l.open_status) return "";
   const low = l.open_conf==="low" ? ' <span class="conf">(rough)</span>' : "";
-  return `<span class="op ${OP_CLS[l.open_status]||""}">${esc(l.open_status)}</span>${low}<div class="op-range">${esc(opRange(l))}</div>`;
+  const lt = l.lead_type && l.lead_type!=="New business" && l.lead_type!=="Chain / franchise" ? `<div class="conf">${esc(l.lead_type)}</div>` : "";
+  const range = l.open_status==="Already open" ? "" : esc(opRange(l));
+  return `<span class="op ${OP_CLS[l.open_status]||""}">${esc(l.open_status)}</span>${low}<div class="op-range">${range}</div>${lt}`;
 }
 const igUrl = h => `https://www.instagram.com/${encodeURIComponent(h)}/`;
 const webUrl = w => /^https?:/i.test(w) ? w : "https://"+w;
@@ -277,6 +286,7 @@ function detail(l){
       <dt>Match</dt><dd>${esc(l.match_level)} · ${l.record_count} record${l.record_count>1?"s":""}</dd></dl>
     <dl><dt>Signals</dt><dd>${l.signals.split(",").map(s=>esc(SIGNALS[s]||s)).join(", ")}</dd>
       <dt>Event types</dt><dd>${esc(l.event_types)||"—"}</dd>
+      <dt>Really new?</dt><dd>${esc(l.lead_type||"New business")}${l.brand_sites?` · this name is on ${esc(l.brand_sites)} new storefronts`:""}${l.open_evidence?`<div class="alt">${esc(l.open_evidence)}</div>`:""}${l.places_url?`<div class="alt"><a href="${esc(l.places_url)}" target="_blank" rel="noopener">Google listing</a></div>`:""}</dd>
       <dt>Estimated opening</dt><dd>${l.open_status?`${esc(l.open_status)} · ${esc(opRange(l))} · ${esc(l.open_conf)} confidence<div class="alt">${esc(l.open_basis)}</div>`:"—"}</dd>
       <dt>Dates</dt><dd>${esc(l.first_event_date)}${l.last_event_date!==l.first_event_date?" → "+esc(l.last_event_date):""} · found ${esc(l.first_seen.slice(0,10))}</dd>
       <dt>Source</dt><dd>${srcs}</dd></dl>
@@ -320,7 +330,7 @@ function stats(){
   $("sub").innerHTML = `New coffee shops from city and state permit, license and inspection data. Refreshed daily${when?` · last run ${when.toLocaleString([], {dateStyle:"medium", timeStyle:"short"})}`:""}.`;
   const runs = (META.runs||[]).map(r=>`<tr><td>${r.url?`<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.jurisdiction||r.source_id)}</a>`:esc(r.source_id)}</td><td class="num">${r.fetched??""}</td><td class="num">${r.matched??""}</td><td>${r.error?"⚠️ "+esc(r.error.slice(0,120)):"ok"}</td></tr>`).join("");
   $("foot").innerHTML = `<p><b>Last run by source</b></p><table><thead><tr><th>Source</th><th>Fetched</th><th>Coffee</th><th>Status</th></tr></thead><tbody>${runs}</tbody></table>
-   <p>Score 0–100: how clearly it's coffee + how close to opening the signal is + recency, minus 45 for chains. Opening (est.) is a date range estimated from the type of record and its date (for example, pre-opening inspections usually come 0 to 6 weeks before opening); "(rough)" means it's based on a state business registration, which is the least precise. Owner names come from the public permit and business filings (often an officer or registered agent, so double-check), or from the shop's website and web search, with a link to where each was found. Instagram, websites and emails come from OpenStreetMap, the shop's own website, web search or hand checks; "(likely)" means the handle matched the name but wasn't confirmed. Status and notes are stored in this browser only; use Download CSV to keep them.</p>`;
+   <p>Score 0–100: how clearly it's coffee + how close to opening the signal is + recency, minus 45 for chains. Opening (est.) is a date range estimated from the type of record and its date (for example, pre-opening inspections usually come 0 to 6 weeks before opening); "(rough)" means it's based on a state business registration, which is the least precise. Owner names come from the public permit and business filings (often an officer or registered agent, so double-check), or from the shop's website and web search, with a link to where each was found. Instagram, websites and emails come from OpenStreetMap, the shop's own website, web search or hand checks; "(likely)" means the handle matched the name but wasn't confirmed. "Really new?" checks whether a shop was already trading: earlier health inspections at the address under the same name (NYC, Chicago), review counts in web results, a Google listing (if set up) and OpenStreetMap. Shops proven to be already open are hidden by the default filter and lose 35 points. Status and notes are stored in this browser only; use Download CSV to keep them.</p>`;
 }
 
 function fillSelect(id, values, label=v=>v){
@@ -347,7 +357,7 @@ fetch("leads.json",{cache:"no-cache"}).then(r=>r.json()).then(j=>{
 }).catch(e=>{$("sub").textContent="Couldn't load leads.json: "+e;});
 
 let t; $("q").addEventListener("input",()=>{clearTimeout(t);t=setTimeout(apply,120);});
-["state","signal","status","opening","contact","hideChains","minScore"].forEach(id=>$(id).addEventListener("change",apply));
+["state","signal","status","opening","ltype","contact","hideChains","minScore"].forEach(id=>$(id).addEventListener("change",apply));
 $("since").addEventListener("click",e=>{const b=e.target.closest("button"); if(!b)return;
   document.querySelectorAll("#since button").forEach(x=>x.classList.toggle("on",x===b)); apply();});
 $("head").addEventListener("click",e=>{const th=e.target.closest("th"); if(!th)return; const k=th.dataset.k;

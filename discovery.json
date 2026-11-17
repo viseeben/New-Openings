@@ -1,0 +1,150 @@
+{
+ "_help": "Cities discover.py searches each week for coffee shops announcing 'coming soon' on Instagram, Facebook and local news. Each city costs 3 Brave searches a week (about 13 a month). Add or remove [city, state] pairs.",
+ "every_days": 6,
+ "cities": [
+  [
+   "New York",
+   "NY"
+  ],
+  [
+   "Brooklyn",
+   "NY"
+  ],
+  [
+   "Queens",
+   "NY"
+  ],
+  [
+   "Chicago",
+   "IL"
+  ],
+  [
+   "Los Angeles",
+   "CA"
+  ],
+  [
+   "San Francisco",
+   "CA"
+  ],
+  [
+   "San Diego",
+   "CA"
+  ],
+  [
+   "Seattle",
+   "WA"
+  ],
+  [
+   "Portland",
+   "OR"
+  ],
+  [
+   "Denver",
+   "CO"
+  ],
+  [
+   "Austin",
+   "TX"
+  ],
+  [
+   "Houston",
+   "TX"
+  ],
+  [
+   "Dallas",
+   "TX"
+  ],
+  [
+   "San Antonio",
+   "TX"
+  ],
+  [
+   "Phoenix",
+   "AZ"
+  ],
+  [
+   "Atlanta",
+   "GA"
+  ],
+  [
+   "Nashville",
+   "TN"
+  ],
+  [
+   "Charlotte",
+   "NC"
+  ],
+  [
+   "Raleigh",
+   "NC"
+  ],
+  [
+   "Durham",
+   "NC"
+  ],
+  [
+   "Miami",
+   "FL"
+  ],
+  [
+   "Orlando",
+   "FL"
+  ],
+  [
+   "Tampa",
+   "FL"
+  ],
+  [
+   "Philadelphia",
+   "PA"
+  ],
+  [
+   "Pittsburgh",
+   "PA"
+  ],
+  [
+   "Boston",
+   "MA"
+  ],
+  [
+   "Washington",
+   "DC"
+  ],
+  [
+   "Baltimore",
+   "MD"
+  ],
+  [
+   "Minneapolis",
+   "MN"
+  ],
+  [
+   "Kansas City",
+   "MO"
+  ],
+  [
+   "St. Louis",
+   "MO"
+  ],
+  [
+   "New Orleans",
+   "LA"
+  ],
+  [
+   "Columbus",
+   "OH"
+  ],
+  [
+   "Cincinnati",
+   "OH"
+  ],
+  [
+   "Salt Lake City",
+   "UT"
+  ],
+  [
+   "Boise",
+   "ID"
+  ]
+ ]
+}

@@ -1,0 +1,6 @@
+{
+  "_help": "Your own filter lists. chains: brands to flag as chains (matched anywhere in the name, lowercase). not_shops: patterns for places that are never leads (hotels, offices...). exclude_names: exact shop names to drop. Changes apply on the next daily run.",
+  "chains": [],
+  "not_shops": [],
+  "exclude_names": []
+}

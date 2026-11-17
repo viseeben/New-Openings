@@ -121,6 +121,15 @@ def distinctive(name):
     return [t for t in tokens(name) if t not in GENERIC and len(t) > 1]
 
 
+def same_business(a, b):
+    """Strict check that two names are the same business, on distinctive words only:
+    'Blue Door Cafe' vs 'Blue Moon Cafe' -> False; 'Myhouse Coffee' vs 'MYHOUSE COFFEE LLC' -> True."""
+    da, db = set(distinctive(a)), set(distinctive(b))
+    if not da or not db:
+        return "".join(tokens(a)) == "".join(tokens(b))
+    return len(da & db) / max(len(da), len(db)) >= 0.75
+
+
 def handle_matches(handle, name):
     """How well a social handle matches a business name: high / medium / low."""
     h = re.sub(r"[^a-z0-9]", "", handle.lower())
@@ -202,7 +211,7 @@ class Store:
         self.con = con
         con.executescript(SCHEMA)
         cols = [r[1] for r in con.execute("PRAGMA table_info(enrichment)")]
-        for c in FIELDS + ["osm_id", "web_checked", "search_checked", "search_note", "updated_at"] + PERSIST:
+        for c in FIELDS + ["osm_id", "web_checked", "search_checked", "search_note", "updated_at"] + PERSIST + VERIFY_COLS:
             if c not in cols:
                 con.execute(f"ALTER TABLE enrichment ADD COLUMN {c} TEXT")
         self.cols = [r[1] for r in con.execute("PRAGMA table_info(enrichment)")]
@@ -409,6 +418,30 @@ def step_owners(store, sources):
         print(f"  owners: chicago accounts {len(set(a for _, a in pairs if a))}")
     except Exception as e:
         print(f"  owners: chicago lookup failed: {str(e)[:200]}")
+
+    # Coming-soon posts and news (discover.py): owner named in the article, Instagram, Facebook
+    for src_id in ("web_instagram", "web_facebook", "web_news"):
+        for k, r in recs_of(src_id):
+            raw = r["raw"]
+            if raw.get("owner") and is_person(raw["owner"]):
+                remember_owner(store, k, raw["owner"], raw.get("owner_role") or "owner", raw.get("url", ""),
+                               "news" if src_id == "web_news" else src_id.replace("web_", ""))
+            if raw.get("instagram"):
+                store.add(k, "instagram", raw["instagram"], "coming_soon_post", 75, "high")
+            if raw.get("facebook"):
+                store.add(k, "facebook", "https://www.facebook.com/" + raw["facebook"], "coming_soon_post", 60)
+
+    # Chicago building permits: named contacts. Mostly property owners, contractors and
+    # architects, so they rank below anything the shop's own filings or website say.
+    for k, r in recs_of("chicago_building_permits"):
+        raw = r["raw"]
+        for i in range(1, 6):
+            typ, nm = (raw.get(f"contact_{i}_type") or "").lower(), nice(raw.get(f"contact_{i}_name"))
+            if not nm or AGENT_SERVICES.search(nm) or any(x in typ for x in ("architect", "engineer", "expeditor",
+                                                                             "contractor", "electric", "plumb")):
+                continue
+            role = "property owner (building permit)" if "owner" in typ else (typ or "permit contact")
+            store.add(k, "owner", nm, "chicago_building_permits", 25 + (5 if is_person(nm) else 0), role)
 
     # Connecticut: Business Master id -> Principals (ka36-64k6)
     try:
@@ -735,6 +768,14 @@ def step_search(store, limit):
             if hit:
                 remember_owner(store, k, hit[0], hit[1], hit[2], "web_search")
                 note.append("owner:" + hit[0])
+        allres = [(u, t, d) for u, t, d in igres + results]
+        rc, rsrc = review_count_from(allres, l["name"])
+        if rc:
+            store.row(k)["review_count"], store.row(k)["review_source"] = str(rc), rsrc
+        fb = pick_facebook(allres, l["name"])
+        if fb:
+            store.add(k, "facebook", fb, "web_search", 45)
+            note.append("fb")
         best = pick_instagram(igs, name, l.get("city"), l.get("state"))
         if best:
             store.add(k, "instagram", best[0], "web_search", 60 if best[1] == "high" else 45, best[1])
@@ -1023,11 +1064,223 @@ def step_people(store, limit):
             print(f"  people: {name}: {str(e)[:120]}")
             continue
         store.row(k)["owner_checked"] = NOW
+        fb = pick_facebook(results, l["name"])
+        if fb:
+            store.add(k, "facebook", fb, "owner_search", 45)
+        rc, rsrc = review_count_from(results, l["name"])
+        if rc and rc > int(store.row(k).get("review_count") or 0):
+            store.row(k)["review_count"], store.row(k)["review_source"] = str(rc), rsrc
         hit = owner_from_results(results, l["name"], l.get("city"))
         if hit:
             remember_owner(store, k, hit[0], hit[1], hit[2], "owner_search")
             found += 1
     print(f"  people: {len(todo)} leads searched, {found} owner names found")
+
+
+# --------------------------------------------------------------------------
+# Is it really opening, or already open? (history, reviews, Google, OSM)
+# --------------------------------------------------------------------------
+# A permit or inspection can come from a brand-new shop, but also from an open shop that
+# changed owners, renewed, moved a wall, or reopened. These checks look for proof that a
+# shop was already trading before its "opening" record:
+#   history  - earlier health inspections at the same address (NYC, Chicago): same name
+#              means an existing shop; a different name means "replacing <old business>"
+#   reviews  - review counts in the search results the search step already fetched
+#   places   - optional Google business listing (GOOGLE_PLACES_API_KEY): open/closed status,
+#              review count, phone, website
+#   osm      - already mapped on OpenStreetMap (new shops rarely are)
+# The verdict lands in enrichment.already_open ("yes" / "likely" / "") with the evidence
+# in open_evidence; export_site.py then shows "Already open" and lowers the score.
+VERIFY_COLS = ["review_count", "review_source", "history_since", "replaced_business", "history_checked",
+               "places_status", "places_reviews", "places_url", "places_checked",
+               "already_open", "open_evidence", "lead_type"]
+
+HISTORY = {  # source_id -> how to look up earlier inspections at the same address
+    "nyc_prepermit_inspections": dict(
+        domain="data.cityofnewyork.us", dataset="43nn-pn8j", name="dba", date="inspection_date",
+        where=lambda raw: "building='{}' AND upper(street)='{}' AND zipcode='{}'".format(
+            sq(raw.get("building")), sq((raw.get("street") or "").upper()), sq(raw.get("zipcode"))),
+        ok=lambda raw: raw.get("building") and raw.get("street") and raw.get("zipcode")),
+    "chicago_food_license_inspections": dict(
+        domain="data.cityofchicago.org", dataset="4ijn-s7e5", name="dba_name", date="inspection_date",
+        where=lambda raw: "upper(address)='{}'".format(sq((raw.get("address") or "").upper().strip())),
+        ok=lambda raw: raw.get("address")),
+    "chicago_new_business_licenses": dict(
+        domain="data.cityofchicago.org", dataset="4ijn-s7e5", name="dba_name", date="inspection_date",
+        where=lambda raw: "upper(address)='{}'".format(sq((raw.get("address") or "").upper().strip())),
+        ok=lambda raw: raw.get("address")),
+}
+
+
+def sq(v):
+    return str(v or "").replace("'", "''").strip()
+
+
+def step_history(store, limit=400):
+    """Earlier inspections at the same address, for leads whose opening is recent or upcoming."""
+    todo = []
+    for k, l in store.leads.items():
+        row = store.row(k)
+        if l["chain"] or row.get("history_checked") or l.get("open_status") not in ("Upcoming", "Opening now"):
+            continue
+        for r in store.records.get(k, []):
+            h = HISTORY.get(r["source_id"])
+            if h and h["ok"](r["raw"]):
+                todo.append((k, l, r, h))
+                break
+    todo.sort(key=lambda t: -int(t[1]["score"] or 0))
+    todo = todo[:limit]
+    existing = replacing = 0
+    for k, l, r, h in todo:
+        cutoff = (dt.date.fromisoformat(l["first_event_date"]) - dt.timedelta(days=30)).isoformat()
+        try:
+            rows = L.http_json(f"https://{h['domain']}/resource/{h['dataset']}.json", {
+                "$select": f"{h['name']} as n, min({h['date']}) as first_d, max({h['date']}) as last_d",
+                "$where": f"{h['where'](r['raw'])} AND {h['date']} < '{cutoff}T00:00:00'",
+                "$group": h["name"], "$order": "last_d DESC", "$limit": 20})
+        except Exception as e:
+            print(f"  history: {l['name']}: {str(e)[:120]}")
+            continue
+        row = store.row(k)
+        row["history_checked"] = NOW
+        # Only the SAME business at this address counts as "already open". A coffee shop moving
+        # into a closed IHOP is a new business: it keeps its score and just shows "replacing IHOP".
+        same = [x for x in rows if same_business(x.get("n", ""), l["name"])]
+        other = [x for x in rows if x not in same and x.get("n")]
+        if same:
+            row["history_since"] = min(x["first_d"][:10] for x in same)
+            existing += 1
+        if other:
+            row["replaced_business"] = f"{nice(other[0]['n'])} (last inspected {other[0]['last_d'][:10]})"
+            replacing += 1
+    print(f"  history: {len(todo)} addresses checked, {existing} already had this shop, "
+          f"{replacing} replace an earlier business")
+
+
+def step_places(store, limit):
+    """Optional: Google business listing. Needs GOOGLE_PLACES_API_KEY (Places API (New)).
+    Text Search with phone/website/rating fields is billed as Enterprise: 1,000 free a month."""
+    key = os.environ.get("GOOGLE_PLACES_API_KEY", "").strip()
+    if not key:
+        print("  places: skipped (set GOOGLE_PLACES_API_KEY to enable)")
+        return
+    todo = []
+    for k, l in store.leads.items():
+        row = store.row(k)
+        last = row.get("places_checked")
+        if l["chain"] or l.get("open_status") not in ("Upcoming", "Opening now", "Probably open"):
+            continue
+        if last and (dt.datetime.fromisoformat(NOW) - dt.datetime.fromisoformat(last[:19])).days < 30:
+            continue
+        todo.append(l)
+    todo.sort(key=lambda l: -int(l["score"] or 0))
+    todo = todo[:limit]
+    fields = ("places.id,places.displayName,places.formattedAddress,places.businessStatus,"
+              "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri")
+    hits = 0
+    for l in todo:
+        q = " ".join(filter(None, [clean_query_name(l["name"]), l.get("address"), l.get("city"), l.get("state")]))
+        try:
+            req = urllib.request.Request(
+                "https://places.googleapis.com/v1/places:searchText",
+                data=json.dumps({"textQuery": q, "pageSize": 3}).encode(),
+                headers={"Content-Type": "application/json", "X-Goog-Api-Key": key, "X-Goog-FieldMask": fields})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                places = json.loads(resp.read().decode()).get("places", [])
+        except urllib.error.HTTPError as e:
+            print(f"  places: HTTP {e.code}, stopping")
+            break
+        except Exception as e:
+            print(f"  places: {l['name']}: {str(e)[:120]}")
+            continue
+        k = l["lead_key"]
+        row = store.row(k)
+        row["places_checked"] = NOW
+        num = (re.match(r"\d+", l.get("address") or "") or [None])[0]
+        for p in places:
+            pname = (p.get("displayName") or {}).get("text", "")
+            if sim(pname, l["name"]) < 0.5 or (num and num not in (p.get("formattedAddress") or "")):
+                continue
+            row["places_status"] = p.get("businessStatus", "")
+            row["places_reviews"] = str(p.get("userRatingCount") or 0)
+            row["places_url"] = p.get("googleMapsUri", "")
+            if p.get("nationalPhoneNumber"):
+                store.add(k, "osm_phone", re.sub(r"\D", "", p["nationalPhoneNumber"])[-10:], "google", 40)
+            if p.get("websiteUri"):
+                store.add(k, "website", p["websiteUri"], "google", 50)
+            hits += 1
+            break
+    print(f"  places: {len(todo)} looked up, {hits} matched a Google listing")
+
+
+REVIEWS_RE = re.compile(r"(\d[\d,]{0,6})\s*\+?\s*(?:google\s+|yelp\s+)?(?:reviews|ratings)\b", re.I)
+
+
+def review_count_from(results, name):
+    """Largest review count mentioned in search results that are about this shop."""
+    dist = [t for t in distinctive(name) if len(t) >= 3]
+    best = (0, "")
+    for u, t, d in results:
+        hay = " ".join(tokens(f"{t} {u}"))
+        if not dist or sum(1 for x in dist if x in hay) < max(1, (len(dist) + 1) // 2):
+            continue
+        for m in REVIEWS_RE.finditer(f"{t} {d}"):
+            n = int(m.group(1).replace(",", ""))
+            if n > best[0] and n < 100000:
+                best = (n, urllib.parse.urlparse(u).netloc.removeprefix("www."))
+    return best
+
+
+def pick_facebook(results, name):
+    """A facebook.com page whose title carries the shop's name."""
+    dist = [t for t in distinctive(name) if len(t) >= 3]
+    for u, t, _ in results:
+        m = re.match(r"https?://(?:www\.|m\.)?facebook\.com/([^/?#]+)", u)
+        if not m or m.group(1).lower() in FB_RESERVED or not dist:
+            continue
+        hay = " ".join(tokens(t))
+        if sum(1 for x in dist if x in hay) >= max(1, (len(dist) + 1) // 2):
+            return f"https://www.facebook.com/{m.group(1)}"
+    return None
+
+
+def step_verdict(store):
+    """Combine the evidence into already_open / open_evidence / lead_type."""
+    counts = {"yes": 0, "likely": 0}
+    for k, l in store.leads.items():
+        row = store.row(k)
+        ev, verdict = [], ""
+        first = l.get("first_event_date") or ""
+        since = row.get("history_since") or ""
+        if since and first and since < (dt.date.fromisoformat(first) - dt.timedelta(days=90)).isoformat():
+            ev.append(f"inspected under this name since {since}")
+            verdict = "yes"
+        pr = int(row.get("places_reviews") or 0)
+        if row.get("places_status") == "OPERATIONAL" and pr >= 10:
+            ev.append(f"open on Google with {pr} reviews")
+            verdict = "yes"
+        elif row.get("places_status") in ("CLOSED_TEMPORARILY",):
+            ev.append("Google says temporarily closed")
+        rc = int(row.get("review_count") or 0)
+        if rc >= 25:
+            ev.append(f"{rc} reviews online ({row.get('review_source')})")
+            verdict = verdict or ("yes" if rc >= 60 else "likely")
+        if row.get("osm_id") and not verdict:
+            ev.append("already on OpenStreetMap")
+            verdict = "likely" if l.get("open_status") != "Upcoming" else ""
+        if row.get("replaced_business") and not since:
+            ev.append("new business replacing " + row["replaced_business"])
+        row["already_open"] = verdict
+        row["open_evidence"] = "; ".join(ev)
+        if verdict == "yes" and since:
+            row["lead_type"] = "Existing shop (new permit or owner)"
+        elif verdict == "yes":
+            row["lead_type"] = "Already open"
+        else:
+            row["lead_type"] = l.get("lead_type") or ""
+        if verdict:
+            counts[verdict] += 1
+    print(f"  verdict: {counts['yes']} already open, {counts['likely']} probably open")
 
 
 # --------------------------------------------------------------------------
@@ -1061,7 +1314,8 @@ def step_manual(store):
 # --------------------------------------------------------------------------
 def export_csv(con, path=L.CSV_FILE):
     ecols = ["owner", "owner_role", "owners_all", "web_owner", "web_owner_role", "web_owner_url", "email", "website", "instagram", "instagram_conf",
-             "facebook", "tiktok", "osm_phone", "hours", "shop_address", "enrich_sources"]
+             "facebook", "tiktok", "osm_phone", "hours", "shop_address", "enrich_sources",
+             "lead_type", "already_open", "open_evidence", "replaced_business", "review_count", "places_url"]
     cur = con.execute(f"""SELECT l.name, l.alt_names, l.address, l.city, l.state, l.zip, l.phone,
         {", ".join("e." + c for c in ecols)},
         l.first_event_date, l.last_event_date, l.open_status, l.open_est_start, l.open_est_end, l.open_conf,
@@ -1090,10 +1344,12 @@ def cmd_stats(con):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("cmd", nargs="?", default="run", choices=["run", "stats"])
-    p.add_argument("--steps", default="owners,osm,search,web,people,manual")
+    p.add_argument("--steps", default="owners,osm,search,web,people,history,places,manual,verdict")
     p.add_argument("--search-limit", type=int, default=int(os.environ.get("SEARCH_LIMIT", "45")))
     p.add_argument("--web-limit", type=int, default=300)
     p.add_argument("--owner-search-limit", type=int, default=int(os.environ.get("OWNER_SEARCH_LIMIT", "8")))
+    p.add_argument("--places-limit", type=int, default=int(os.environ.get("PLACES_LIMIT", "30")))
+    p.add_argument("--history-limit", type=int, default=int(os.environ.get("HISTORY_LIMIT", "400")))
     a = p.parse_args()
     con = sqlite3.connect(L.DB_FILE)
     if a.cmd == "stats":
@@ -1117,8 +1373,14 @@ def main():
         step_web(store, a.web_limit)
     if "people" in steps:
         step_people(store, a.owner_search_limit)
+    if "history" in steps:
+        step_history(store, a.history_limit)
+    if "places" in steps:
+        step_places(store, a.places_limit)
     step_saved_owners(store)
     store.resolve()
+    if "verdict" in steps:
+        step_verdict(store)
     store.save()
     export_csv(con)
     print(f"enrichment done in {time.time() - t0:.0f}s")
