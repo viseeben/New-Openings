@@ -58,6 +58,14 @@ jobs:
         if: "!(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.fetch) || hashFiles('coffee_leads.db') == '')"
         run: python3 leads.py rebuild
 
+      # Weekly: coffee shops announcing "coming soon" on Instagram, Facebook and local news
+      # (needs BRAVE_API_KEY; skips itself if it ran in the last 6 days). Cities: discovery.json
+      - name: Find coming-soon posts and news
+        continue-on-error: true
+        env:
+          BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+        run: python3 discover.py
+
       # Owner names, Instagram, websites, emails. Never fails the job: the page still builds.
       - name: Find owners, Instagram and websites
         continue-on-error: true

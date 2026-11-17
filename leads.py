@@ -503,7 +503,7 @@ CREATE TABLE IF NOT EXISTS runs (
 
 SIGNAL_WEIGHT = {"pre_opening_inspection": 40, "new_food_permit": 35,
                  "plan_review": 35, "building_permit": 25,
-                 "new_business_license": 25, "business_registration": 15,
+                 "new_business_license": 25, "business_registration": 15, "coming_soon": 25,
                  "inspection": 10}
 
 
@@ -521,12 +521,36 @@ OPENING_RULES = {
     "plan_review": (60, 150, "medium", "Health plan review typically comes 2 to 5 months before opening."),
     "building_permit": (60, 180, "medium", "Build-out permits typically come 2 to 6 months before opening."),
     "new_business_license": (-14, 45, "medium", "A new business license is usually issued within weeks of opening."),
+    "coming_soon": (14, 120, "medium", "Announced 'coming soon' online (Instagram, Facebook or news); most open within 1 to 4 months."),
     "business_registration": (90, 270, "low", "A new LLC or trade name usually comes 3 to 9 months before opening, and some never open."),
     "inspection": (-90, 0, "medium", "Routine inspections happen after a shop is open."),
 }
 FIRST_APPEARANCE_RULE = (-60, 14, "medium",
                          "First inspection on record. These are often the first routine inspection, so the shop is likely already open.")
 CONF_RANK = {"high": 3, "medium": 2, "low": 1}
+
+
+_MON = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+def month_from_hint(r):
+    """'December 5' / 'early Jan 2027' in a coming-soon post -> (first, last day of that month)."""
+    try:
+        raw = json.loads(r.get("raw") or "{}")
+    except Exception:
+        return None
+    h = (raw.get("opening_hint") or "").lower()
+    m = re.search(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", h)
+    if not m or not r.get("event_date"):
+        return None
+    seen = dt.date.fromisoformat(r["event_date"][:10])
+    y = int((re.search(r"20\d\d", h) or [seen.year])[0])
+    mon = _MON[m.group(1)]
+    if not re.search(r"20\d\d", h) and mon < seen.month:
+        y += 1  # "opening in February" said in November
+    first = dt.date(y, mon, 1)
+    last = (dt.date(y + (mon == 12), mon % 12 + 1, 1) - dt.timedelta(days=1))
+    return first, last
 
 
 def opening_window(recs, src_by_id, today):
@@ -542,7 +566,11 @@ def opening_window(recs, src_by_id, today):
                 actual = parse_date(get(json.loads(r.get("raw") or "{}"), src["fields"]["open_date"])) or ""
             except Exception:
                 actual = ""
-        if actual:
+        hint = month_from_hint(r) if r["signal"] == "coming_soon" else None
+        if hint:
+            lo, hi = hint
+            conf, why, rank = "medium", "Opening date mentioned in the post or article.", 3
+        elif actual:
             lo = hi = dt.date.fromisoformat(actual)
             conf, why = "high", "Opening / first-sales date reported in the public record."
             rank = 4
@@ -675,6 +703,9 @@ def merge_zipless(con, groups):
     return moved
 
 
+NON_STOREFRONT = {"business_registration", "coming_soon"}
+
+
 def merge_registrations(con, groups):
     """A state LLC / trade-name filing is usually filed from the owner's home or an agent's office,
     so it lands at a different address than the shop and becomes a separate lead with no
@@ -682,14 +713,14 @@ def merge_registrations(con, groups):
     fold the filing into it: the shop gets the filing's owner names, and the duplicate goes away."""
     by_brand = {}
     for k, recs in groups.items():
-        if any(r["signal"] != "business_registration" for r in recs):
+        if any(r["signal"] not in NON_STOREFRONT for r in recs):
             for b in {brand_key(r["name"]) for r in recs} | {brand_key(r["alt_name"]) for r in recs}:
                 if b:
                     by_brand.setdefault((recs[0]["state"], b), set()).add(k)
     moved = 0
     for k in list(groups):
         recs = groups[k]
-        if any(r["signal"] != "business_registration" for r in recs):
+        if any(r["signal"] not in NON_STOREFRONT for r in recs):
             continue
         targets = set()
         for r in recs:
@@ -730,7 +761,7 @@ def rebuild_leads(con):
     # How many different storefronts carry the same brand name (all states, last 12 months)
     sites = {}
     for k, recs in groups.items():
-        if any(r["signal"] != "business_registration" for r in recs):
+        if any(r["signal"] not in NON_STOREFRONT for r in recs):
             b = brand_key(max(recs, key=lambda r: len(r["name"] or ""))["name"])
             if b:
                 sites.setdefault(b, set()).add(k)

@@ -110,6 +110,13 @@ earlier but needs a quick check (Google/Instagram) to find the actual location.
   ahead) with no shop name, merged into the shop's license or inspection at the same address
   when that arrives. Permit contacts are mostly landlords and contractors, so they rank low.
 - **Facebook pages** are picked from the search results the search steps already fetch.
+- **Coming soon online** (`discover.py`, weekly, needs `BRAVE_API_KEY`): for each city in
+  `discovery.json`, three searches for coffee shops announcing "coming soon" on Instagram,
+  Facebook and local news. Only search results are read. Keeps the shop's name, link, a
+  street address and owner if mentioned, and an opening month if given ("opening in
+  December" sets the estimate to December). Listicles, chains and non-coffee businesses are
+  dropped; news must name the city. These merge into the shop's permit or license lead by
+  address or by business name in the same state. About 450 searches a month for 36 cities.
 
 ## Estimated opening (`open_status`, `open_est_start`, `open_est_end`, `open_conf`)
 

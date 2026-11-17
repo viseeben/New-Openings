@@ -121,6 +121,15 @@ def distinctive(name):
     return [t for t in tokens(name) if t not in GENERIC and len(t) > 1]
 
 
+def same_business(a, b):
+    """Strict check that two names are the same business, on distinctive words only:
+    'Blue Door Cafe' vs 'Blue Moon Cafe' -> False; 'Myhouse Coffee' vs 'MYHOUSE COFFEE LLC' -> True."""
+    da, db = set(distinctive(a)), set(distinctive(b))
+    if not da or not db:
+        return "".join(tokens(a)) == "".join(tokens(b))
+    return len(da & db) / max(len(da), len(db)) >= 0.75
+
+
 def handle_matches(handle, name):
     """How well a social handle matches a business name: high / medium / low."""
     h = re.sub(r"[^a-z0-9]", "", handle.lower())
@@ -409,6 +418,18 @@ def step_owners(store, sources):
         print(f"  owners: chicago accounts {len(set(a for _, a in pairs if a))}")
     except Exception as e:
         print(f"  owners: chicago lookup failed: {str(e)[:200]}")
+
+    # Coming-soon posts and news (discover.py): owner named in the article, Instagram, Facebook
+    for src_id in ("web_instagram", "web_facebook", "web_news"):
+        for k, r in recs_of(src_id):
+            raw = r["raw"]
+            if raw.get("owner") and is_person(raw["owner"]):
+                remember_owner(store, k, raw["owner"], raw.get("owner_role") or "owner", raw.get("url", ""),
+                               "news" if src_id == "web_news" else src_id.replace("web_", ""))
+            if raw.get("instagram"):
+                store.add(k, "instagram", raw["instagram"], "coming_soon_post", 75, "high")
+            if raw.get("facebook"):
+                store.add(k, "facebook", "https://www.facebook.com/" + raw["facebook"], "coming_soon_post", 60)
 
     # Chicago building permits: named contacts. Mostly property owners, contractors and
     # architects, so they rank below anything the shop's own filings or website say.
@@ -1122,7 +1143,9 @@ def step_history(store, limit=400):
             continue
         row = store.row(k)
         row["history_checked"] = NOW
-        same = [x for x in rows if sim(x.get("n", ""), l["name"]) >= 0.6]
+        # Only the SAME business at this address counts as "already open". A coffee shop moving
+        # into a closed IHOP is a new business: it keeps its score and just shows "replacing IHOP".
+        same = [x for x in rows if same_business(x.get("n", ""), l["name"])]
         other = [x for x in rows if x not in same and x.get("n")]
         if same:
             row["history_since"] = min(x["first_d"][:10] for x in same)
