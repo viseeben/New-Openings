@@ -887,7 +887,8 @@ def cmd_stats(args):
 
 def cmd_rebuild(args):
     """Rebuild leads from stored records with the current code and filters (no fetching)."""
-    con = connect()
+    con = sqlite3.connect(DB_FILE)
+    con.executescript(SCHEMA)
     rebuild_leads(con)
     export_csv(con)
 
