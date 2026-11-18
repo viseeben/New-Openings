@@ -1128,8 +1128,7 @@
         "address": [
           "street_number",
           "street_direction",
-          "street_name",
-          "suffix"
+          "street_name"
         ],
         "category": "work_description",
         "event_type": "permit_type",
