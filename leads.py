@@ -292,14 +292,27 @@ def fetch_socrata(src, since):
     url = base + "?" + urllib.parse.urlencode(params)
     if src["id"] in CACHE:  # pre-fetched rows, keyed by source id
         return CACHE[src["id"]]
-    out, offset = [], 0
+    out, offset, dropped = [], 0, []
     while True:
         params["$offset"] = offset
-        rows = http_json(base, params)
+        try:
+            rows = http_json(base, params)
+        except RuntimeError as e:
+            # A dataset renamed or removed a column: drop it from the query and try again,
+            # so one missing optional column doesn't lose the whole source.
+            m = re.search(r"No such column: (\w+)", str(e))
+            sel = [c.strip() for c in params.get("$select", "").split(",")]
+            if m and m.group(1) in sel and len(dropped) < 8:
+                dropped.append(m.group(1))
+                params["$select"] = ",".join(c for c in sel if c != m.group(1))
+                continue
+            raise
         out.extend(rows)
         if len(rows) < 50000:
             break
         offset += 50000
+    if dropped:
+        print(f"  {src['id']}: column(s) no longer in the dataset, skipped: {', '.join(dropped)}")
     return out
 
 
